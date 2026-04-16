@@ -1,4 +1,4 @@
-from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response
+from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken
 from functools import wraps
@@ -7,8 +7,9 @@ from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 from sqlalchemy import func, extract
-import json
-import os
+import json, os, io, csv
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dfc-sistema-chave-secreta-2024')
@@ -212,6 +213,23 @@ def dashboard():
         Projection.date <= fim_30
     ).scalar() or 0
 
+    # Gráfico pizza - saídas por categoria no mês
+    pizza_saidas = db.session.query(
+        Category.name, func.sum(Transaction.value).label('total')
+    ).join(Transaction, Transaction.category_id == Category.id).filter(
+        Transaction.type == 'saida',
+        Transaction.date >= inicio_mes,
+        Transaction.date <= fim_mes,
+        Transaction.status == 'realizado'
+    ).group_by(Category.id).order_by(func.sum(Transaction.value).desc()).limit(8).all()
+
+    pizza_labels = [r[0] for r in pizza_saidas]
+    pizza_values = [float(r[1]) for r in pizza_saidas]
+
+    # Alerta de saldo baixo
+    limite_alerta = float(os.environ.get('ALERTA_SALDO', 10000))
+    alerta_saldo = saldo_total < limite_alerta
+
     return render_template('dashboard.html',
         entradas_mes=entradas_mes, saidas_mes=saidas_mes,
         saldo_mes=saldo_mes, saldo_total=saldo_total,
@@ -221,6 +239,10 @@ def dashboard():
         lancamentos_recentes=lancamentos_recentes,
         contratos_ativos=contratos_ativos,
         prev_entradas=prev_entradas, prev_saidas=prev_saidas,
+        pizza_labels=json.dumps(pizza_labels),
+        pizza_values=json.dumps(pizza_values),
+        alerta_saldo=alerta_saldo,
+        limite_alerta=limite_alerta,
         hoje=hoje
     )
 
@@ -733,6 +755,229 @@ def relatorio_pdf():
     response.headers['Content-Type'] = 'application/pdf'
     response.headers['Content-Disposition'] = f'attachment; filename=DFC_{ano}_{mes:02d}.pdf'
     return response
+
+# ─── RELATÓRIO COMPARATIVO ────────────────────────────────────────────────────
+
+@app.route('/relatorios/comparativo')
+@login_required
+def relatorio_comparativo():
+    hoje = date.today()
+    mes1 = request.args.get('mes1', hoje.month, type=int)
+    ano1 = request.args.get('ano1', hoje.year, type=int)
+    mes2_default = (hoje - relativedelta(months=1)).month
+    ano2_default = (hoje - relativedelta(months=1)).year
+    mes2 = request.args.get('mes2', mes2_default, type=int)
+    ano2 = request.args.get('ano2', ano2_default, type=int)
+
+    def get_totais(ano, mes):
+        inicio = date(ano, mes, 1)
+        fim = (inicio + relativedelta(months=1)) - timedelta(days=1)
+        e = db.session.query(func.sum(Transaction.value)).filter(
+            Transaction.type == 'entrada', Transaction.date >= inicio,
+            Transaction.date <= fim, Transaction.status == 'realizado'
+        ).scalar() or 0
+        s = db.session.query(func.sum(Transaction.value)).filter(
+            Transaction.type == 'saida', Transaction.date >= inicio,
+            Transaction.date <= fim, Transaction.status == 'realizado'
+        ).scalar() or 0
+        cats = db.session.query(
+            Category.name, Category.type, func.sum(Transaction.value).label('total')
+        ).join(Transaction, Transaction.category_id == Category.id).filter(
+            Transaction.date >= inicio, Transaction.date <= fim,
+            Transaction.status == 'realizado'
+        ).group_by(Category.id).order_by(Category.type, func.sum(Transaction.value).desc()).all()
+        return {'entradas': float(e), 'saidas': float(s), 'saldo': float(e - s), 'cats': cats}
+
+    d1 = get_totais(ano1, mes1)
+    d2 = get_totais(ano2, mes2)
+
+    meses_disponiveis = []
+    for y in range(hoje.year - 2, hoje.year + 1):
+        for m in range(1, 13):
+            meses_disponiveis.append({'ano': y, 'mes': m,
+                'label': date(y, m, 1).strftime('%B/%Y').capitalize()})
+
+    return render_template('relatorios/comparativo.html',
+        d1=d1, d2=d2,
+        mes1=mes1, ano1=ano1, mes2=mes2, ano2=ano2,
+        label1=date(ano1, mes1, 1).strftime('%B/%Y').capitalize(),
+        label2=date(ano2, mes2, 1).strftime('%B/%Y').capitalize(),
+        meses_disponiveis=meses_disponiveis
+    )
+
+# ─── EXPORTAÇÃO EXCEL ─────────────────────────────────────────────────────────
+
+@app.route('/lancamentos/exportar-excel')
+@login_required
+def lancamentos_exportar_excel():
+    tipo = request.args.get('tipo', '')
+    status = request.args.get('status', '')
+    data_ini = request.args.get('data_ini', '')
+    data_fim = request.args.get('data_fim', '')
+    categoria_id = request.args.get('categoria_id', '')
+
+    q = Transaction.query
+    if tipo:
+        q = q.filter(Transaction.type == tipo)
+    if status:
+        q = q.filter(Transaction.status == status)
+    if data_ini:
+        q = q.filter(Transaction.date >= datetime.strptime(data_ini, '%Y-%m-%d').date())
+    if data_fim:
+        q = q.filter(Transaction.date <= datetime.strptime(data_fim, '%Y-%m-%d').date())
+    if categoria_id:
+        q = q.filter(Transaction.category_id == int(categoria_id))
+    lancamentos = q.order_by(Transaction.date.asc()).all()
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Lançamentos'
+
+    header_fill = PatternFill(start_color='1e2235', end_color='1e2235', fill_type='solid')
+    header_font = Font(bold=True, color='FFFFFF', size=11)
+    border = Border(
+        left=Side(style='thin', color='DDDDDD'), right=Side(style='thin', color='DDDDDD'),
+        top=Side(style='thin', color='DDDDDD'), bottom=Side(style='thin', color='DDDDDD')
+    )
+
+    headers = ['Data', 'Descrição', 'Categoria', 'Contrato', 'Tipo', 'Valor (R$)', 'Status', 'Observações']
+    col_widths = [14, 40, 25, 20, 10, 18, 14, 40]
+    for i, (h, w) in enumerate(zip(headers, col_widths), 1):
+        cell = ws.cell(row=1, column=i, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = border
+        ws.column_dimensions[cell.column_letter].width = w
+
+    green_fill = PatternFill(start_color='dcfce7', end_color='dcfce7', fill_type='solid')
+    red_fill = PatternFill(start_color='fee2e2', end_color='fee2e2', fill_type='solid')
+
+    for row_num, t in enumerate(lancamentos, 2):
+        row_fill = green_fill if t.type == 'entrada' else red_fill
+        data = [
+            t.date.strftime('%d/%m/%Y'),
+            t.description,
+            t.category.name if t.category else '-',
+            t.contract.number if t.contract else '-',
+            'Entrada' if t.type == 'entrada' else 'Saída',
+            float(t.value),
+            t.status.capitalize(),
+            t.notes or ''
+        ]
+        for col_num, value in enumerate(data, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=value)
+            cell.fill = row_fill
+            cell.border = border
+            cell.alignment = Alignment(vertical='center')
+            if col_num == 6:
+                cell.number_format = '#,##0.00'
+    ws.row_dimensions[1].height = 22
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f'lancamentos_{date.today().strftime("%Y%m%d")}.xlsx'
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     as_attachment=True, download_name=filename)
+
+# ─── IMPORTAÇÃO CSV/EXCEL ─────────────────────────────────────────────────────
+
+@app.route('/lancamentos/importar', methods=['GET', 'POST'])
+@login_required
+def lancamentos_importar():
+    if not current_user.can_edit():
+        flash('Sem permissão para importar lançamentos.', 'danger')
+        return redirect(url_for('lancamentos'))
+
+    categorias = Category.query.filter_by(active=True).order_by(Category.type, Category.name).all()
+    if request.method == 'POST':
+        arquivo = request.files.get('arquivo')
+        if not arquivo or arquivo.filename == '':
+            flash('Nenhum arquivo selecionado.', 'danger')
+            return redirect(request.url)
+
+        filename = arquivo.filename.lower()
+        erros = []
+        importados = 0
+        try:
+            if filename.endswith('.csv'):
+                content = arquivo.read().decode('utf-8-sig')
+                reader = csv.DictReader(io.StringIO(content))
+                rows = list(reader)
+            elif filename.endswith(('.xlsx', '.xls')):
+                wb = openpyxl.load_workbook(arquivo, data_only=True) if filename.endswith('.xlsx') else None
+                if wb is None:
+                    import xlrd
+                    book = xlrd.open_workbook(file_contents=arquivo.read())
+                    sheet = book.sheet_by_index(0)
+                    headers = [str(sheet.cell_value(0, c)).strip() for c in range(sheet.ncols)]
+                    rows = [dict(zip(headers, [str(sheet.cell_value(r, c)).strip() for c in range(sheet.ncols)])) for r in range(1, sheet.nrows)]
+                else:
+                    ws = wb.active
+                    headers = [str(ws.cell(1, c).value).strip() for c in range(1, ws.max_column + 1)]
+                    rows = []
+                    for r in range(2, ws.max_row + 1):
+                        rows.append({headers[c-1]: str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)})
+            else:
+                flash('Formato inválido. Use CSV, XLSX ou XLS.', 'danger')
+                return redirect(request.url)
+
+            cat_map = {c.name.lower(): c for c in categorias}
+            for i, row in enumerate(rows, 2):
+                try:
+                    data_str = row.get('data', row.get('Data', '')).strip()
+                    desc = row.get('descricao', row.get('descrição', row.get('Descricao', row.get('Descrição', '')))).strip()
+                    tipo = row.get('tipo', row.get('Tipo', '')).strip().lower()
+                    valor_str = str(row.get('valor', row.get('Valor', '0'))).replace('R$', '').replace('.', '').replace(',', '.').strip()
+                    cat_nome = row.get('categoria', row.get('Categoria', '')).strip().lower()
+                    status_imp = row.get('status', row.get('Status', 'realizado')).strip().lower()
+
+                    if not data_str or not desc or not tipo or not valor_str:
+                        erros.append(f'Linha {i}: campos obrigatórios ausentes.')
+                        continue
+                    for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
+                        try:
+                            dt = datetime.strptime(data_str, fmt).date()
+                            break
+                        except ValueError:
+                            dt = None
+                    if not dt:
+                        erros.append(f'Linha {i}: data inválida "{data_str}".')
+                        continue
+                    if tipo not in ('entrada', 'saida', 'saída'):
+                        erros.append(f'Linha {i}: tipo deve ser "entrada" ou "saida".')
+                        continue
+                    tipo_norm = 'saida' if 'sa' in tipo else 'entrada'
+                    valor = float(valor_str)
+                    cat = cat_map.get(cat_nome)
+                    if not cat:
+                        cat = Category.query.filter_by(type=tipo_norm, active=True).first()
+                    status_norm = 'realizado' if 'realiz' in status_imp else 'previsto'
+
+                    db.session.add(Transaction(
+                        date=dt, description=desc, category_id=cat.id if cat else None,
+                        value=valor, type=tipo_norm, status=status_norm,
+                        user_id=current_user.id
+                    ))
+                    importados += 1
+                except Exception as e:
+                    erros.append(f'Linha {i}: {str(e)}')
+
+            db.session.commit()
+            msg = f'{importados} lançamento(s) importado(s) com sucesso.'
+            if erros:
+                msg += f' {len(erros)} linha(s) com erro ignorada(s).'
+            flash(msg, 'success' if importados > 0 else 'warning')
+            if erros:
+                for e in erros[:5]:
+                    flash(e, 'warning')
+            return redirect(url_for('lancamentos'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Erro ao processar arquivo: {str(e)}', 'danger')
+
+    return render_template('lancamentos/importar.html', categorias=categorias)
 
 # ─── CATEGORIAS ───────────────────────────────────────────────────────────────
 

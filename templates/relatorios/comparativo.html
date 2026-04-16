@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Relatório Comparativo{% endblock %}
+{% block page_title %}Relatório Comparativo{% endblock %}
+
+{% block content %}
+
+<!-- Seletor de períodos -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Comparar dois meses</h2>
+  </div>
+  <div class="panel-body">
+    <form method="GET" style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="margin:0">
+        <label>Mês 1</label>
+        <select name="mes1" class="form-control" onchange="syncAno(this,'ano1')" style="width:auto">
+          {% for m in meses_disponiveis %}
+            <option value="{{ m.mes }}" {% if m.mes == mes1 and m.ano == ano1 %}selected{% endif %}
+                    data-ano="{{ m.ano }}">{{ m.label }}</option>
+          {% endfor %}
+        </select>
+        <input type="hidden" name="ano1" id="ano1" value="{{ ano1 }}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Mês 2</label>
+        <select name="mes2" class="form-control" onchange="syncAno(this,'ano2')" style="width:auto">
+          {% for m in meses_disponiveis %}
+            <option value="{{ m.mes }}" {% if m.mes == mes2 and m.ano == ano2 %}selected{% endif %}
+                    data-ano="{{ m.ano }}">{{ m.label }}</option>
+          {% endfor %}
+        </select>
+        <input type="hidden" name="ano2" id="ano2" value="{{ ano2 }}">
+      </div>
+      <button type="submit" class="btn btn-primary">Comparar</button>
+    </form>
+  </div>
+</div>
+
+<!-- Cards comparativos -->
+{% macro fmt(v) %}{{ "R$ {:,.2f}".format(v).replace(",","X").replace(".",",").replace("X",".") }}{% endmacro %}
+{% macro diff(v1, v2) %}
+  {% set d = v1 - v2 %}
+  {% if d > 0 %}<span style="color:#16a34a;font-weight:700">▲ {{ fmt(d) }}</span>
+  {% elif d < 0 %}<span style="color:#dc2626;font-weight:700">▼ {{ fmt(d|abs) }}</span>
+  {% else %}<span style="color:#6b7280">— igual</span>{% endif %}
+{% endmacro %}
+
+<div class="cards-grid">
+  <div class="card card-green">
+    <div class="card-content">
+      <span class="card-label">Entradas — {{ label1 }}</span>
+      <span class="card-value">{{ fmt(d1.entradas) }}</span>
+    </div>
+  </div>
+  <div class="card card-green">
+    <div class="card-content">
+      <span class="card-label">Entradas — {{ label2 }}</span>
+      <span class="card-value">{{ fmt(d2.entradas) }}</span>
+    </div>
+  </div>
+  <div class="card card-red">
+    <div class="card-content">
+      <span class="card-label">Saídas — {{ label1 }}</span>
+      <span class="card-value">{{ fmt(d1.saidas) }}</span>
+    </div>
+  </div>
+  <div class="card card-red">
+    <div class="card-content">
+      <span class="card-label">Saídas — {{ label2 }}</span>
+      <span class="card-value">{{ fmt(d2.saidas) }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Tabela resumo -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Resumo Comparativo</h2>
+  </div>
+  <div class="panel-body">
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Indicador</th>
+            <th>{{ label1 }}</th>
+            <th>{{ label2 }}</th>
+            <th>Variação (1 vs 2)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Total de Entradas</strong></td>
+            <td class="text-green font-bold">{{ fmt(d1.entradas) }}</td>
+            <td class="text-green font-bold">{{ fmt(d2.entradas) }}</td>
+            <td>{{ diff(d1.entradas, d2.entradas) }}</td>
+          </tr>
+          <tr>
+            <td><strong>Total de Saídas</strong></td>
+            <td class="text-red font-bold">{{ fmt(d1.saidas) }}</td>
+            <td class="text-red font-bold">{{ fmt(d2.saidas) }}</td>
+            <td>{{ diff(d2.saidas, d1.saidas) }}</td>
+          </tr>
+          <tr style="background:#f9fafb">
+            <td><strong>Saldo do Período</strong></td>
+            <td class="{% if d1.saldo >= 0 %}text-green{% else %}text-red{% endif %} font-bold">{{ fmt(d1.saldo) }}</td>
+            <td class="{% if d2.saldo >= 0 %}text-green{% else %}text-red{% endif %} font-bold">{{ fmt(d2.saldo) }}</td>
+            <td>{{ diff(d1.saldo, d2.saldo) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Gráfico comparativo -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Gráfico Comparativo</h2>
+  </div>
+  <div class="panel-body chart-container" style="height:320px">
+    <canvas id="compChart"></canvas>
+  </div>
+</div>
+
+<!-- Detalhamento por categoria -->
+<div class="charts-row">
+  {% for label, data in [(label1, d1), (label2, d2)] %}
+  <div class="panel" style="flex:1;min-width:300px">
+    <div class="panel-header">
+      <h2 class="panel-title">Categorias — {{ label }}</h2>
+    </div>
+    <div class="panel-body">
+      {% if data.cats %}
+      <div class="table-responsive">
+        <table class="table" style="font-size:12px">
+          <thead><tr><th>Categoria</th><th>Tipo</th><th>Total</th></tr></thead>
+          <tbody>
+            {% for cat in data.cats %}
+            <tr>
+              <td>{{ cat[0] }}</td>
+              <td>
+                {% if cat[1] == 'entrada' %}<span class="badge badge-green">Entrada</span>
+                {% else %}<span class="badge badge-red">Saída</span>{% endif %}
+              </td>
+              <td class="{% if cat[1]=='entrada' %}text-green{% else %}text-red{% endif %} font-bold">
+                {{ fmt(cat[2]) }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="empty-state" style="padding:30px 0">
+        <p>Sem lançamentos realizados neste período.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function syncAno(sel, hiddenId) {
+  const opt = sel.options[sel.selectedIndex];
+  document.getElementById(hiddenId).value = opt.dataset.ano;
+}
+// preenche hidden ano ao carregar
+document.querySelectorAll('select[name="mes1"], select[name="mes2"]').forEach(sel => {
+  const opt = sel.options[sel.selectedIndex];
+  const target = sel.name === 'mes1' ? 'ano1' : 'ano2';
+  if (opt) document.getElementById(target).value = opt.dataset.ano;
+});
+
+const ctx = document.getElementById('compChart').getContext('2d');
+new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: ['Entradas', 'Saídas', 'Saldo'],
+    datasets: [
+      {
+        label: '{{ label1 }}',
+        data: [{{ d1.entradas }}, {{ d1.saidas }}, {{ d1.saldo }}],
+        backgroundColor: ['rgba(34,197,94,0.7)','rgba(239,68,68,0.7)','rgba(79,110,247,0.7)'],
+        borderRadius: 4
+      },
+      {
+        label: '{{ label2 }}',
+        data: [{{ d2.entradas }}, {{ d2.saidas }}, {{ d2.saldo }}],
+        backgroundColor: ['rgba(34,197,94,0.35)','rgba(239,68,68,0.35)','rgba(79,110,247,0.35)'],
+        borderRadius: 4
+      }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'top' },
+      tooltip: {
+        callbacks: {
+          label: c => ' R$ ' + c.parsed.y.toLocaleString('pt-BR', {minimumFractionDigits:2})
+        }
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: { callback: v => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2}) }
+      }
+    }
+  }
+});
+</script>
+{% endblock %}

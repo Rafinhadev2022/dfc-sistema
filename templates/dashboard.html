@@ -77,13 +77,41 @@
   </div>
 </div>
 
-<!-- Gráfico -->
-<div class="panel">
-  <div class="panel-header">
-    <h2 class="panel-title">Fluxo de Caixa — Últimos 6 Meses</h2>
+<!-- Alerta de saldo baixo -->
+{% if alerta_saldo %}
+<div class="alert-saldo-baixo">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+  <strong>Atenção:</strong> Saldo acumulado abaixo do limite de alerta
+  ({{ "R$ {:,.2f}".format(limite_alerta).replace(",","X").replace(".",",").replace("X",".") }}).
+  Verifique o fluxo de caixa.
+</div>
+{% endif %}
+
+<!-- Gráficos lado a lado -->
+<div class="charts-row">
+  <div class="panel" style="flex:2">
+    <div class="panel-header">
+      <h2 class="panel-title">Fluxo de Caixa — Últimos 6 Meses</h2>
+    </div>
+    <div class="panel-body chart-container">
+      <canvas id="fluxoChart"></canvas>
+    </div>
   </div>
-  <div class="panel-body chart-container">
-    <canvas id="fluxoChart"></canvas>
+
+  <div class="panel" style="flex:1">
+    <div class="panel-header">
+      <h2 class="panel-title">Saídas por Categoria (mês atual)</h2>
+    </div>
+    <div class="panel-body chart-container">
+      {% if pizza_values and pizza_values != '[]' %}
+        <canvas id="pizzaChart"></canvas>
+      {% else %}
+        <div class="empty-state" style="padding:40px 0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+          <p>Sem saídas realizadas neste mês.</p>
+        </div>
+      {% endif %}
+    </div>
   </div>
 </div>
 
@@ -149,6 +177,7 @@
 
 {% block scripts %}
 <script>
+// Gráfico de barras - fluxo 6 meses
 const ctx = document.getElementById('fluxoChart').getContext('2d');
 new Chart(ctx, {
   type: 'bar',
@@ -180,19 +209,53 @@ new Chart(ctx, {
       legend: { position: 'top' },
       tooltip: {
         callbacks: {
-          label: ctx => ' R$ ' + ctx.parsed.y.toLocaleString('pt-BR', {minimumFractionDigits:2})
+          label: c => ' R$ ' + c.parsed.y.toLocaleString('pt-BR', {minimumFractionDigits:2})
         }
       }
     },
     scales: {
       y: {
         beginAtZero: true,
-        ticks: {
-          callback: v => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2})
-        }
+        ticks: { callback: v => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2}) }
       }
     }
   }
 });
+
+// Gráfico de pizza - saídas por categoria
+const pizzaLabels = {{ pizza_labels|safe }};
+const pizzaValues = {{ pizza_values|safe }};
+if (pizzaValues.length > 0) {
+  const pizzaCtx = document.getElementById('pizzaChart').getContext('2d');
+  const pizzaColors = [
+    '#ef4444','#f97316','#eab308','#22c55e','#06b6d4',
+    '#6366f1','#ec4899','#84cc16'
+  ];
+  new Chart(pizzaCtx, {
+    type: 'doughnut',
+    data: {
+      labels: pizzaLabels,
+      datasets: [{
+        data: pizzaValues,
+        backgroundColor: pizzaColors.slice(0, pizzaValues.length),
+        borderWidth: 2,
+        borderColor: '#1e2235'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: {
+        legend: { position: 'bottom', labels: { padding: 10, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: c => ' R$ ' + c.parsed.toLocaleString('pt-BR', {minimumFractionDigits:2})
+          }
+        }
+      }
+    }
+  });
+}
 </script>
 {% endblock %}

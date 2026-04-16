@@ -420,6 +420,18 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 
 /* ── Chart ────────────────────────────────────────────────────────────────── */
 .chart-container { height: 280px; position: relative; }
+.charts-row { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+.charts-row > .panel { margin-bottom: 0; }
+
+/* ── Alert saldo baixo ────────────────────────────────────────────────────── */
+.alert-saldo-baixo {
+  display: flex; align-items: center; gap: 10px;
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #f59e0b; border-radius: var(--radius);
+  padding: 14px 18px; margin-bottom: 20px;
+  color: #92400e; font-size: 13px; font-weight: 500;
+  box-shadow: 0 2px 8px rgba(245,158,11,0.2);
+}
 
 /* ── Misc ─────────────────────────────────────────────────────────────────── */
 .mb-3 { margin-bottom: 20px; }

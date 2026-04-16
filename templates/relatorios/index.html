@@ -7,9 +7,10 @@
 <div class="panel">
   <div class="panel-header">
     <h2 class="panel-title">Selecionar Período</h2>
-    <a href="{{ url_for('relatorio_pdf', mes=mes, ano=ano) }}" class="btn btn-danger btn-sm" target="_blank">
-      ⬇ Download PDF
-    </a>
+    <div style="display:flex;gap:8px">
+      <a href="{{ url_for('relatorio_comparativo') }}" class="btn btn-outline btn-sm">Comparativo</a>
+      <a href="{{ url_for('relatorio_pdf', mes=mes, ano=ano) }}" class="btn btn-danger btn-sm" target="_blank">⬇ Download PDF</a>
+    </div>
   </div>
   <div class="panel-body">
     <form method="GET" class="filter-form">

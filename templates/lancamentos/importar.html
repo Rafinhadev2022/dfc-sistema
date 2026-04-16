@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Importar Lançamentos{% endblock %}
+{% block page_title %}Importar Lançamentos{% endblock %}
+
+{% block content %}
+<div class="panel panel-narrow">
+  <div class="panel-header">
+    <h2 class="panel-title">Importar via CSV / Excel</h2>
+    <a href="{{ url_for('lancamentos') }}" class="btn btn-outline btn-sm">← Voltar</a>
+  </div>
+  <div class="panel-body">
+
+    <div style="background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;padding:16px 20px;margin-bottom:24px">
+      <p style="font-weight:700;margin-bottom:8px;color:#3730a3">Formato esperado das colunas:</p>
+      <div class="table-responsive">
+        <table class="table" style="font-size:12px">
+          <thead>
+            <tr>
+              <th>data</th><th>descricao</th><th>tipo</th><th>valor</th>
+              <th>categoria</th><th>status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>15/04/2025</td>
+              <td>Recebimento medição contrato 01</td>
+              <td>entrada</td>
+              <td>45000,00</td>
+              <td>Recebimento de Medição</td>
+              <td>realizado</td>
+            </tr>
+            <tr>
+              <td>16/04/2025</td>
+              <td>Combustível frota</td>
+              <td>saida</td>
+              <td>3200,00</td>
+              <td>Combustível</td>
+              <td>realizado</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <ul style="font-size:12px;color:#4b5563;margin-top:10px;padding-left:18px;line-height:1.8">
+        <li><strong>data</strong>: formato DD/MM/AAAA ou AAAA-MM-DD</li>
+        <li><strong>tipo</strong>: "entrada" ou "saida"</li>
+        <li><strong>valor</strong>: número com vírgula decimal (ex: 1.500,00 ou 1500.00)</li>
+        <li><strong>categoria</strong>: deve existir no sistema (opcional — usa padrão se não encontrar)</li>
+        <li><strong>status</strong>: "realizado" ou "previsto" (padrão: realizado)</li>
+        <li>Formatos aceitos: <strong>.csv</strong>, <strong>.xlsx</strong>, <strong>.xls</strong></li>
+      </ul>
+    </div>
+
+    <form method="POST" enctype="multipart/form-data">
+      <div class="form-group">
+        <label for="arquivo">Selecionar arquivo</label>
+        <input type="file" id="arquivo" name="arquivo" class="form-control"
+               accept=".csv,.xlsx,.xls" required>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:8px">
+        <button type="submit" class="btn btn-primary">Importar</button>
+        <a href="{{ url_for('lancamentos') }}" class="btn btn-outline">Cancelar</a>
+      </div>
+    </form>
+
+    <div style="margin-top:28px;padding-top:20px;border-top:1px solid #f0f0f0">
+      <p style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px">Categorias disponíveis no sistema:</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        {% for c in categorias %}
+          <span class="badge {% if c.type == 'entrada' %}badge-green{% else %}badge-red{% endif %}"
+                style="font-size:11px">{{ c.name }}</span>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
