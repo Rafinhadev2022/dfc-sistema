@@ -39,11 +39,20 @@ def load_user(user_id):
 def init_database():
     """Inicializa o banco com tabelas e dados padrão na primeira execução."""
     db.create_all()
-    if not User.query.filter_by(email='admin@dfc.com').first():
+
+    ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'contatonuees@gmail.com')
+    ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'nunes2025#')
+
+    admin = User.query.filter_by(role='admin').first()
+    if admin:
+        # Atualiza credenciais do admin existente
+        admin.email = ADMIN_EMAIL
+        admin.password_hash = generate_password_hash(ADMIN_PASSWORD, method='pbkdf2:sha256')
+    else:
         db.session.add(User(
             name='Administrador',
-            email='admin@dfc.com',
-            password_hash=generate_password_hash('admin123', method='pbkdf2:sha256'),
+            email=ADMIN_EMAIL,
+            password_hash=generate_password_hash(ADMIN_PASSWORD, method='pbkdf2:sha256'),
             role='admin'
         ))
     categorias_entrada = ['Recebimento de Medição','Antecipação de Contrato',
