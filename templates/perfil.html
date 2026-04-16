@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Meu Perfil{% endblock %}
+{% block page_title %}Meu Perfil{% endblock %}
+
+{% block content %}
+<div class="panel-row">
+
+  <!-- Dados pessoais -->
+  <div class="panel panel-half">
+    <div class="panel-header">
+      <h2 class="panel-title">Dados Pessoais</h2>
+    </div>
+    <div class="panel-body">
+      <div class="profile-avatar-block">
+        <div class="profile-avatar">{{ current_user.name[0].upper() }}</div>
+        <div>
+          <div class="font-bold" style="font-size:16px">{{ current_user.name }}</div>
+          <div class="text-gray text-sm">{{ current_user.email }}</div>
+          <div class="mt-1">
+            {% if current_user.role == 'admin' %}
+              <span class="badge badge-red">Administrador</span>
+            {% elif current_user.role == 'editor' %}
+              <span class="badge badge-blue">Editor</span>
+            {% else %}
+              <span class="badge badge-gray">Visualizador</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <form method="POST" style="margin-top:20px">
+        <input type="hidden" name="acao" value="dados">
+        <div class="form-group">
+          <label>Nome completo</label>
+          <input type="text" name="name" class="form-control" required value="{{ current_user.name }}">
+        </div>
+        <div class="form-group">
+          <label>E-mail</label>
+          <input type="email" name="email" class="form-control" required value="{{ current_user.email }}">
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Salvar Dados</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Alterar senha -->
+  <div class="panel panel-half">
+    <div class="panel-header">
+      <h2 class="panel-title">Alterar Senha</h2>
+    </div>
+    <div class="panel-body">
+      <form method="POST">
+        <input type="hidden" name="acao" value="senha">
+        <div class="form-group">
+          <label>Senha atual <span class="required">*</span></label>
+          <div class="input-password-wrap">
+            <input type="password" name="senha_atual" id="senha-atual" class="form-control" required placeholder="••••••••">
+            <button type="button" class="toggle-password" onclick="togglePass('senha-atual')">👁</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Nova senha <span class="required">*</span></label>
+          <div class="input-password-wrap">
+            <input type="password" name="nova_senha" id="nova-senha" class="form-control" required minlength="6" placeholder="Mínimo 6 caracteres">
+            <button type="button" class="toggle-password" onclick="togglePass('nova-senha')">👁</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Confirmar nova senha <span class="required">*</span></label>
+          <div class="input-password-wrap">
+            <input type="password" name="confirmar_senha" id="conf-senha" class="form-control" required minlength="6" placeholder="Repita a nova senha">
+            <button type="button" class="toggle-password" onclick="togglePass('conf-senha')">👁</button>
+          </div>
+        </div>
+        <div id="senha-match-msg" style="font-size:12px;margin-bottom:8px"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Alterar Senha</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePass(id) {
+  const el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+const novaSenha = document.getElementById('nova-senha');
+const confSenha = document.getElementById('conf-senha');
+const msg = document.getElementById('senha-match-msg');
+
+function checkMatch() {
+  if (!confSenha.value) { msg.textContent = ''; return; }
+  if (novaSenha.value === confSenha.value) {
+    msg.textContent = '✓ Senhas coincidem'; msg.style.color = '#059669';
+  } else {
+    msg.textContent = '✗ Senhas não coincidem'; msg.style.color = '#dc2626';
+  }
+}
+novaSenha.addEventListener('input', checkMatch);
+confSenha.addEventListener('input', checkMatch);
+</script>
+{% endblock %}

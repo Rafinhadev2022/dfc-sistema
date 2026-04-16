@@ -1,6 +1,7 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, Category, Transaction, Contract, Projection
+from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken
+from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
@@ -35,6 +36,15 @@ login_manager.login_message = 'Faça login para acessar o sistema.'
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not current_user.is_authenticated or not current_user.is_admin():
+            flash('Acesso restrito ao administrador.', 'danger')
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+    return decorated
 
 def init_database():
     """Inicializa o banco com tabelas e dados padrão na primeira execução."""
@@ -771,6 +781,157 @@ def categoria_excluir(id):
 def api_categorias(tipo):
     cats = Category.query.filter_by(type=tipo, active=True).order_by(Category.name).all()
     return jsonify([{'id': c.id, 'name': c.name} for c in cats])
+
+# ─── USUÁRIOS ────────────────────────────────────────────────────────────────
+
+@app.route('/usuarios')
+@login_required
+@admin_required
+def usuarios():
+    users = User.query.order_by(User.created_at.desc()).all()
+    return render_template('usuarios/index.html', users=users)
+
+@app.route('/usuarios/novo', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def usuario_novo():
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        role = request.form.get('role', 'viewer')
+        if User.query.filter_by(email=email).first():
+            flash('Este e-mail já está cadastrado.', 'danger')
+        else:
+            u = User(name=name, email=email,
+                     password_hash=generate_password_hash(password, method='pbkdf2:sha256'),
+                     role=role, active=True)
+            db.session.add(u)
+            db.session.commit()
+            flash(f'Usuário {name} criado com sucesso!', 'success')
+            return redirect(url_for('usuarios'))
+    return render_template('usuarios/form.html', usuario=None)
+
+@app.route('/usuarios/<int:id>/editar', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def usuario_editar(id):
+    u = User.query.get_or_404(id)
+    if request.method == 'POST':
+        u.name = request.form.get('name', '').strip()
+        u.email = request.form.get('email', '').strip()
+        u.role = request.form.get('role', 'viewer')
+        nova_senha = request.form.get('password', '')
+        if nova_senha:
+            u.password_hash = generate_password_hash(nova_senha, method='pbkdf2:sha256')
+        db.session.commit()
+        flash('Usuário atualizado com sucesso!', 'success')
+        return redirect(url_for('usuarios'))
+    return render_template('usuarios/form.html', usuario=u)
+
+@app.route('/usuarios/<int:id>/toggle', methods=['POST'])
+@login_required
+@admin_required
+def usuario_toggle(id):
+    u = User.query.get_or_404(id)
+    if u.id == current_user.id:
+        flash('Você não pode desativar sua própria conta.', 'warning')
+    else:
+        u.active = not u.active
+        db.session.commit()
+        flash(f'Usuário {"ativado" if u.active else "desativado"}.', 'success')
+    return redirect(url_for('usuarios'))
+
+@app.route('/usuarios/<int:id>/excluir', methods=['POST'])
+@login_required
+@admin_required
+def usuario_excluir(id):
+    u = User.query.get_or_404(id)
+    if u.id == current_user.id:
+        flash('Você não pode excluir sua própria conta.', 'warning')
+    elif u.transactions:
+        flash('Usuário possui lançamentos vinculados. Desative-o em vez de excluir.', 'warning')
+    else:
+        db.session.delete(u)
+        db.session.commit()
+        flash('Usuário excluído.', 'success')
+    return redirect(url_for('usuarios'))
+
+# ─── PERFIL ───────────────────────────────────────────────────────────────────
+
+@app.route('/perfil', methods=['GET', 'POST'])
+@login_required
+def perfil():
+    if request.method == 'POST':
+        acao = request.form.get('acao')
+        if acao == 'dados':
+            current_user.name = request.form.get('name', '').strip()
+            novo_email = request.form.get('email', '').strip()
+            if novo_email != current_user.email:
+                if User.query.filter_by(email=novo_email).first():
+                    flash('Este e-mail já está em uso.', 'danger')
+                    return redirect(url_for('perfil'))
+                current_user.email = novo_email
+            db.session.commit()
+            flash('Dados atualizados com sucesso!', 'success')
+        elif acao == 'senha':
+            senha_atual = request.form.get('senha_atual', '')
+            nova_senha = request.form.get('nova_senha', '')
+            confirmar = request.form.get('confirmar_senha', '')
+            if not check_password_hash(current_user.password_hash, senha_atual):
+                flash('Senha atual incorreta.', 'danger')
+            elif nova_senha != confirmar:
+                flash('As senhas não coincidem.', 'danger')
+            elif len(nova_senha) < 6:
+                flash('A nova senha deve ter pelo menos 6 caracteres.', 'danger')
+            else:
+                current_user.password_hash = generate_password_hash(nova_senha, method='pbkdf2:sha256')
+                db.session.commit()
+                flash('Senha alterada com sucesso!', 'success')
+        return redirect(url_for('perfil'))
+    return render_template('perfil.html')
+
+# ─── REDEFINIÇÃO DE SENHA ─────────────────────────────────────────────────────
+
+@app.route('/esqueci-senha', methods=['GET', 'POST'])
+def esqueci_senha():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    token_gerado = None
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        u = User.query.filter_by(email=email, active=True).first()
+        if u:
+            # Invalidar tokens anteriores
+            PasswordResetToken.query.filter_by(user_id=u.id, used=False).update({'used': True})
+            token = PasswordResetToken(user_id=u.id)
+            db.session.add(token)
+            db.session.commit()
+            token_gerado = token.token
+        else:
+            flash('E-mail não encontrado.', 'danger')
+    return render_template('esqueci_senha.html', token_gerado=token_gerado)
+
+@app.route('/redefinir-senha/<token>', methods=['GET', 'POST'])
+def redefinir_senha(token):
+    t = PasswordResetToken.query.filter_by(token=token, used=False).first()
+    if not t:
+        flash('Link inválido ou já utilizado.', 'danger')
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        nova_senha = request.form.get('nova_senha', '')
+        confirmar = request.form.get('confirmar_senha', '')
+        if nova_senha != confirmar:
+            flash('As senhas não coincidem.', 'danger')
+        elif len(nova_senha) < 6:
+            flash('A senha deve ter pelo menos 6 caracteres.', 'danger')
+        else:
+            t.user.password_hash = generate_password_hash(nova_senha, method='pbkdf2:sha256')
+            t.used = True
+            db.session.commit()
+            flash('Senha redefinida com sucesso! Faça login.', 'success')
+            return redirect(url_for('login'))
+    return render_template('redefinir_senha.html', token=token, user=t.user)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))

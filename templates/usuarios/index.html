@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Usuários{% endblock %}
+{% block page_title %}Gerenciar Usuários{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Usuários do Sistema</h2>
+    <a href="{{ url_for('usuario_novo') }}" class="btn btn-primary btn-sm">+ Novo Usuário</a>
+  </div>
+  <div class="panel-body">
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>E-mail</th>
+            <th>Perfil</th>
+            <th>Status</th>
+            <th>Cadastrado em</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr class="{% if not u.active %}row-inactive{% endif %}">
+            <td>
+              <div style="display:flex;align-items:center;gap:10px">
+                <div class="user-avatar-sm">{{ u.name[0].upper() }}</div>
+                <span class="font-bold">{{ u.name }}
+                  {% if u.id == current_user.id %}
+                    <span class="badge badge-blue" style="font-size:10px">Você</span>
+                  {% endif %}
+                </span>
+              </div>
+            </td>
+            <td class="text-gray">{{ u.email }}</td>
+            <td>
+              {% if u.role == 'admin' %}
+                <span class="badge badge-red">Administrador</span>
+              {% elif u.role == 'editor' %}
+                <span class="badge badge-blue">Editor</span>
+              {% else %}
+                <span class="badge badge-gray">Visualizador</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge {% if u.active %}badge-green{% else %}badge-gray{% endif %}">
+                {{ 'Ativo' if u.active else 'Inativo' }}
+              </span>
+            </td>
+            <td class="text-gray text-sm nowrap">{{ u.created_at.strftime('%d/%m/%Y') }}</td>
+            <td class="text-center nowrap">
+              <a href="{{ url_for('usuario_editar', id=u.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              {% if u.id != current_user.id %}
+              <form method="POST" action="{{ url_for('usuario_toggle', id=u.id) }}" style="display:inline">
+                <button type="submit" class="btn btn-outline btn-xs">
+                  {{ 'Desativar' if u.active else 'Ativar' }}
+                </button>
+              </form>
+              <form method="POST" action="{{ url_for('usuario_excluir', id=u.id) }}" style="display:inline"
+                onsubmit="return confirm('Excluir usuário {{ u.name }}?')">
+                <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Legenda de permissões -->
+    <div class="permissions-info">
+      <h3 class="permissions-title">Níveis de Acesso</h3>
+      <div class="permissions-grid">
+        <div class="permission-card permission-admin">
+          <span class="badge badge-red mb-1">Administrador</span>
+          <ul>
+            <li>✓ Acesso total ao sistema</li>
+            <li>✓ Gerenciar usuários</li>
+            <li>✓ Criar/editar/excluir tudo</li>
+            <li>✓ Baixar relatórios PDF</li>
+          </ul>
+        </div>
+        <div class="permission-card permission-editor">
+          <span class="badge badge-blue mb-1">Editor</span>
+          <ul>
+            <li>✓ Lançamentos, contratos, projeções</li>
+            <li>✓ Visualizar relatórios</li>
+            <li>✓ Baixar PDF</li>
+            <li>✗ Gerenciar usuários</li>
+          </ul>
+        </div>
+        <div class="permission-card permission-viewer">
+          <span class="badge badge-gray mb-1">Visualizador</span>
+          <ul>
+            <li>✓ Visualizar dashboard</li>
+            <li>✓ Ver relatórios e lançamentos</li>
+            <li>✗ Criar ou editar dados</li>
+            <li>✗ Gerenciar usuários</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

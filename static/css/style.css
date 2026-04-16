@@ -469,6 +469,63 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 }
 .login-footer { text-align: center; margin-top: 18px; font-size: 11.5px; color: #9ca3af; }
 
+/* ── Usuários ─────────────────────────────────────────────────────────────── */
+.user-avatar-sm {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  background: linear-gradient(135deg, #4f6ef7, #7c3aed);
+  color: #fff; font-weight: 700; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.mb-1 { margin-bottom: 6px; }
+.permissions-info {
+  margin-top: 24px; padding-top: 20px;
+  border-top: 1px solid #f1f5f9;
+}
+.permissions-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 12px; }
+.permissions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: 12px; }
+.permission-card {
+  padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+}
+.permission-card ul { list-style: none; margin-top: 8px; }
+.permission-card ul li { font-size: 12px; color: var(--text-muted); padding: 2px 0; }
+.permission-admin { background: #fff5f5; border-color: #fecaca; }
+.permission-editor { background: #eff6ff; border-color: #bfdbfe; }
+.permission-viewer { background: #f8fafc; border-color: #e2e8f0; }
+.role-info { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 4px; margin-bottom: 16px; }
+.role-info-text { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+/* ── Perfil ───────────────────────────────────────────────────────────────── */
+.profile-avatar-block { display: flex; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid #f1f5f9; margin-bottom: 6px; }
+.profile-avatar {
+  width: 58px; height: 58px; border-radius: 16px; flex-shrink: 0;
+  background: linear-gradient(135deg, #4f6ef7, #7c3aed);
+  color: #fff; font-weight: 800; font-size: 22px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 14px rgba(79,110,247,0.3);
+}
+.input-password-wrap { position: relative; }
+.input-password-wrap .form-control { padding-right: 40px; }
+.toggle-password {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; font-size: 14px; padding: 2px;
+  color: var(--text-muted);
+}
+
+/* ── Reset de senha ───────────────────────────────────────────────────────── */
+.reset-success-box { text-align: center; }
+.reset-success-icon {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: #d1fae5; color: #059669;
+  font-size: 22px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 12px;
+}
+.reset-link-box {
+  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: var(--radius-sm);
+  padding: 10px 14px; margin: 10px 0; word-break: break-all;
+}
+.reset-link { font-size: 11.5px; color: #4f6ef7; }
+
 /* ── Responsive ───────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   .sidebar { transform: translateX(-100%); width: 252px !important; }
