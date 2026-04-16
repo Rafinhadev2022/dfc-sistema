@@ -22,13 +22,13 @@ function toggleSidebar() {
   el.textContent = now.toLocaleDateString('pt-BR', opts);
 })();
 
-// ── Auto-dismiss alerts ─────────────────────────────────────────────────────
-document.querySelectorAll('.alert').forEach(alert => {
-  setTimeout(() => {
-    alert.style.transition = 'opacity 0.5s';
-    alert.style.opacity = '0';
-    setTimeout(() => alert.remove(), 500);
-  }, 4000);
+// ── Auto-dismiss toasts ─────────────────────────────────────────────────────
+document.querySelectorAll('.toast').forEach(toast => {
+  const dismiss = () => {
+    toast.classList.add('toast-out');
+    setTimeout(() => toast.remove(), 300);
+  };
+  setTimeout(dismiss, 5000);
 });
 
 // ── Money input mask for all .money-input fields ────────────────────────────

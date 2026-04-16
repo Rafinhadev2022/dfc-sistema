@@ -392,7 +392,55 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 .badge-yellow { background: #fef9c3; color: #854d0e; }
 .badge-gray   { background: #f1f5f9; color: #475569; }
 
-/* ── Alerts ───────────────────────────────────────────────────────────────── */
+/* ── Toast notifications ──────────────────────────────────────────────────── */
+#toast-container {
+  position: fixed; bottom: 24px; right: 24px;
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 9999; pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 12px;
+  min-width: 300px; max-width: 420px;
+  padding: 14px 16px 14px 14px;
+  border-radius: 12px; border-left: 4px solid transparent;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10);
+  font-size: 13.5px; font-weight: 500;
+  pointer-events: all; position: relative; overflow: hidden;
+  animation: toast-in 0.35s cubic-bezier(0.34,1.56,0.64,1) both;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(60px) scale(0.95); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+.toast.toast-out {
+  animation: toast-out 0.3s ease forwards;
+}
+@keyframes toast-out {
+  to { opacity: 0; transform: translateX(60px) scale(0.9); max-height: 0; padding: 0; margin: 0; }
+}
+.toast-success { background: #ecfdf5; color: #065f46; border-left-color: #10b981; }
+.toast-danger  { background: #fef2f2; color: #991b1b; border-left-color: #ef4444; }
+.toast-warning { background: #fffbeb; color: #92400e; border-left-color: #f59e0b; }
+.toast-info    { background: #eef2ff; color: #3730a3; border-left-color: #6366f1; }
+.toast-icon    { flex-shrink: 0; display: flex; align-items: center; }
+.toast-msg     { flex: 1; line-height: 1.4; }
+.toast-close   {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  font-size: 18px; line-height: 1; color: inherit; opacity: 0.5;
+  padding: 0 2px; transition: opacity 0.15s;
+}
+.toast-close:hover { opacity: 1; }
+.toast-progress {
+  position: absolute; bottom: 0; left: 0; height: 3px;
+  background: currentColor; opacity: 0.25; border-radius: 0 0 0 12px;
+  animation: toast-progress 5s linear forwards;
+}
+@keyframes toast-progress {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+
+/* ── Alerts (mantidos para compatibilidade) ───────────────────────────────── */
 .alert {
   padding: 12px 18px; border-radius: var(--radius-sm);
   margin-bottom: 16px; font-size: 13px; font-weight: 500;
