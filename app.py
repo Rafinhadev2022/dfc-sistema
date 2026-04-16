@@ -53,16 +53,56 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated
 
+def run_migrations():
+    """Garante que todas as colunas necessárias existem. Roda SEMPRE, antes do seed."""
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(db.engine)
+    is_pg = 'postgresql' in str(app.config['SQLALCHEMY_DATABASE_URI'])
+    blob_type = 'BYTEA' if is_pg else 'BLOB'
+
+    def add_col(table, col, col_type):
+        try:
+            # Verifica se tabela existe antes de inspecionar colunas
+            if table not in inspector.get_table_names():
+                return
+            cols = {c['name'] for c in inspector.get_columns(table)}
+            if col not in cols:
+                db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {col_type}'))
+                db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f'[MIGRAÇÃO] add_col {table}.{col}: {e}')
+
+    # users
+    add_col('users', 'active', 'BOOLEAN DEFAULT 1')
+
+    # transactions
+    add_col('transactions', 'attachment_data',     blob_type)
+    add_col('transactions', 'attachment_original', 'VARCHAR(255)')
+    add_col('transactions', 'attachment_mimetype', 'VARCHAR(100)')
+    add_col('transactions', 'cost_center_id',      'INTEGER')
+
+    # Remove coluna legada filesystem se existir (PostgreSQL)
+    try:
+        if 'transactions' in inspector.get_table_names():
+            existing_t = {c['name'] for c in inspector.get_columns('transactions')}
+            if 'attachment_filename' in existing_t and is_pg:
+                db.session.execute(text('ALTER TABLE transactions DROP COLUMN attachment_filename'))
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
+
 def init_database():
-    """Inicializa o banco com tabelas e dados padrão na primeira execução."""
+    """Cria tabelas e popula dados padrão."""
     db.create_all()
+    run_migrations()  # ← migrações logo após create_all, antes de qualquer query
 
     ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'contatonuees@gmail.com')
     ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'nunes2025#')
 
     admin = User.query.filter_by(role='admin').first()
     if admin:
-        # Atualiza credenciais do admin existente
         admin.email = ADMIN_EMAIL
         admin.password_hash = generate_password_hash(ADMIN_PASSWORD, method='pbkdf2:sha256')
     else:
@@ -87,40 +127,14 @@ def init_database():
             db.session.add(Category(name=name, type='saida', active=True))
     db.session.commit()
 
-    # Migração: adiciona colunas novas nas tabelas existentes
-    from sqlalchemy import inspect as sa_inspect, text
-    inspector = sa_inspect(db.engine)
-    is_pg = 'postgresql' in str(app.config['SQLALCHEMY_DATABASE_URI'])
-
-    def add_col(table, col, col_type):
-        try:
-            cols = {c['name'] for c in inspector.get_columns(table)}
-            if col not in cols:
-                db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {col_type}'))
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-    blob_type = 'BYTEA' if is_pg else 'BLOB'
-    add_col('transactions', 'attachment_data',     blob_type)
-    add_col('transactions', 'attachment_original', 'VARCHAR(255)')
-    add_col('transactions', 'attachment_mimetype', 'VARCHAR(100)')
-    add_col('transactions', 'cost_center_id',      'INTEGER')
-
-    # Remove coluna legada filesystem (PostgreSQL suporta DROP COLUMN)
-    try:
-        existing_t = {c['name'] for c in inspector.get_columns('transactions')}
-        if 'attachment_filename' in existing_t and is_pg:
-            db.session.execute(text('ALTER TABLE transactions DROP COLUMN attachment_filename'))
-            db.session.commit()
-    except Exception:
-        db.session.rollback()
 
 with app.app_context():
+    db.create_all()        # cria tabelas novas sem depender do seed
+    run_migrations()       # adiciona colunas faltantes
     try:
-        init_database()
+        init_database()    # popula dados (admin, categorias)
     except Exception as e:
-        print(f'[AVISO] Erro ao inicializar banco: {e}')
+        print(f'[AVISO] Erro ao inicializar dados: {e}')
 
 # ─── HEALTH CHECK ────────────────────────────────────────────────────────────
 
