@@ -12,11 +12,19 @@ import os
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dfc-sistema-chave-secreta-2024')
 
-# Suporte a banco de dados PostgreSQL (produção) ou SQLite (local)
+# Banco de dados: PostgreSQL em produção, SQLite local
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
 if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL or 'sqlite:///dfc.db'
+
+if DATABASE_URL:
+    app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
+else:
+    # SQLite: usa /tmp em produção (Render) ou pasta local
+    db_path = os.path.join('/tmp', 'dfc.db') if os.environ.get('RENDER') else os.path.join(app.instance_path, 'dfc.db')
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
@@ -54,7 +62,10 @@ def init_database():
     db.session.commit()
 
 with app.app_context():
-    init_database()
+    try:
+        init_database()
+    except Exception as e:
+        print(f'[AVISO] Erro ao inicializar banco: {e}')
 
 # ─── AUTH ────────────────────────────────────────────────────────────────────
 
