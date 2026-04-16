@@ -99,6 +99,9 @@ class BillReminder(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     paid_at = db.Column(db.DateTime)
     transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True)
+    attachment_data     = db.Column(db.LargeBinary)
+    attachment_original = db.Column(db.String(255))
+    attachment_mimetype = db.Column(db.String(100))
     category = db.relationship('Category', backref='bill_reminders', lazy=True)
     user = db.relationship('User', backref='bill_reminders', lazy=True)
 

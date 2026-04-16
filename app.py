@@ -88,6 +88,11 @@ def run_migrations():
     add_col('transactions', 'attachment_mimetype', 'VARCHAR(100)')
     add_col('transactions', 'cost_center_id',      'INTEGER')
 
+    # bill_reminders
+    add_col('bill_reminders', 'attachment_data',     blob_type)
+    add_col('bill_reminders', 'attachment_original', 'VARCHAR(255)')
+    add_col('bill_reminders', 'attachment_mimetype', 'VARCHAR(100)')
+
     # Remove coluna legada filesystem se existir (PostgreSQL)
     try:
         if 'transactions' in inspector.get_table_names():
@@ -1285,22 +1290,35 @@ def lembrete_novo():
     categorias = Category.query.filter_by(type='saida', active=True).order_by(Category.name).all()
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     if request.method == 'POST':
-        valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
-        b = BillReminder(
-            description=request.form['description'].strip(),
-            value=float(valor_str),
-            due_date=datetime.strptime(request.form['due_date'], '%Y-%m-%d').date(),
-            category_id=int(request.form['category_id']) if request.form.get('category_id') else None,
-            cost_center_id=int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None,
-            recurrence=request.form.get('recurrence', 'nenhuma'),
-            status='pendente',
-            notes=request.form.get('notes', '').strip(),
-            user_id=current_user.id
-        )
-        db.session.add(b)
-        db.session.commit()
-        flash('Lembrete criado!', 'success')
-        return redirect(url_for('lembretes'))
+        try:
+            valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
+            b = BillReminder(
+                description=request.form['description'].strip(),
+                value=float(valor_str),
+                due_date=datetime.strptime(request.form['due_date'], '%Y-%m-%d').date(),
+                category_id=int(request.form['category_id']) if request.form.get('category_id') else None,
+                cost_center_id=int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None,
+                recurrence=request.form.get('recurrence', 'nenhuma'),
+                status='pendente',
+                notes=request.form.get('notes', '').strip(),
+                user_id=current_user.id
+            )
+            arquivo = request.files.get('attachment')
+            if arquivo and arquivo.filename:
+                if not allowed_file(arquivo.filename):
+                    flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
+                    return render_template('lembretes/form.html', lembrete=None,
+                                           categorias=categorias, centros=centros, hoje=date.today())
+                b.attachment_data = arquivo.read()
+                b.attachment_original = arquivo.filename
+                b.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
+            db.session.add(b)
+            db.session.commit()
+            flash('Lembrete criado!', 'success')
+            return redirect(url_for('lembretes'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Erro ao salvar: {str(e)}', 'danger')
     return render_template('lembretes/form.html', lembrete=None,
                            categorias=categorias, centros=centros, hoje=date.today())
 
@@ -1311,19 +1329,32 @@ def lembrete_editar(id):
     categorias = Category.query.filter_by(type='saida', active=True).order_by(Category.name).all()
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     if request.method == 'POST':
-        valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
-        b.description = request.form['description'].strip()
-        b.value = float(valor_str)
-        b.due_date = datetime.strptime(request.form['due_date'], '%Y-%m-%d').date()
-        b.category_id = int(request.form['category_id']) if request.form.get('category_id') else None
-        b.cost_center_id = int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None
-        b.recurrence = request.form.get('recurrence', 'nenhuma')
-        b.notes = request.form.get('notes', '').strip()
-        if b.status in ('atrasado', 'pendente'):
-            b.status = 'pendente' if b.due_date >= date.today() else 'atrasado'
-        db.session.commit()
-        flash('Lembrete atualizado!', 'success')
-        return redirect(url_for('lembretes'))
+        try:
+            valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
+            b.description = request.form['description'].strip()
+            b.value = float(valor_str)
+            b.due_date = datetime.strptime(request.form['due_date'], '%Y-%m-%d').date()
+            b.category_id = int(request.form['category_id']) if request.form.get('category_id') else None
+            b.cost_center_id = int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None
+            b.recurrence = request.form.get('recurrence', 'nenhuma')
+            b.notes = request.form.get('notes', '').strip()
+            if b.status in ('atrasado', 'pendente'):
+                b.status = 'pendente' if b.due_date >= date.today() else 'atrasado'
+            arquivo = request.files.get('attachment')
+            if arquivo and arquivo.filename:
+                if not allowed_file(arquivo.filename):
+                    flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
+                    return render_template('lembretes/form.html', lembrete=b,
+                                           categorias=categorias, centros=centros, hoje=date.today())
+                b.attachment_data = arquivo.read()
+                b.attachment_original = arquivo.filename
+                b.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
+            db.session.commit()
+            flash('Lembrete atualizado!', 'success')
+            return redirect(url_for('lembretes'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Erro ao atualizar: {str(e)}', 'danger')
     return render_template('lembretes/form.html', lembrete=b,
                            categorias=categorias, centros=centros, hoje=date.today())
 
@@ -1384,6 +1415,48 @@ def lembrete_cancelar(id):
     db.session.commit()
     flash('Lembrete cancelado.', 'success')
     return redirect(url_for('lembretes'))
+
+@app.route('/lembretes/<int:id>/anexo')
+@login_required
+def lembrete_anexo(id):
+    b = BillReminder.query.get_or_404(id)
+    if not b.attachment_data:
+        flash('Este lembrete não possui anexo.', 'warning')
+        return redirect(url_for('lembretes'))
+    return send_file(
+        io.BytesIO(b.attachment_data),
+        mimetype=b.attachment_mimetype or 'application/octet-stream',
+        as_attachment=False,
+        download_name=b.attachment_original or 'anexo'
+    )
+
+@app.route('/lembretes/<int:id>/anexo/download')
+@login_required
+def lembrete_anexo_download(id):
+    b = BillReminder.query.get_or_404(id)
+    if not b.attachment_data:
+        flash('Este lembrete não possui anexo.', 'warning')
+        return redirect(url_for('lembretes'))
+    return send_file(
+        io.BytesIO(b.attachment_data),
+        mimetype=b.attachment_mimetype or 'application/octet-stream',
+        as_attachment=True,
+        download_name=b.attachment_original or 'anexo'
+    )
+
+@app.route('/lembretes/<int:id>/anexo/excluir', methods=['POST'])
+@login_required
+def lembrete_anexo_excluir(id):
+    b = BillReminder.query.get_or_404(id)
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('lembrete_editar', id=id))
+    b.attachment_data = None
+    b.attachment_original = None
+    b.attachment_mimetype = None
+    db.session.commit()
+    flash('Anexo removido.', 'success')
+    return redirect(url_for('lembrete_editar', id=id))
 
 @app.route('/lembretes/<int:id>/excluir', methods=['POST'])
 @login_required
