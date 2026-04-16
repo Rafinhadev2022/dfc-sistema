@@ -28,6 +28,34 @@ login_manager.login_message = 'Faça login para acessar o sistema.'
 def load_user(user_id):
     return User.query.get(int(user_id))
 
+def init_database():
+    """Inicializa o banco com tabelas e dados padrão na primeira execução."""
+    db.create_all()
+    if not User.query.filter_by(email='admin@dfc.com').first():
+        db.session.add(User(
+            name='Administrador',
+            email='admin@dfc.com',
+            password_hash=generate_password_hash('admin123', method='pbkdf2:sha256'),
+            role='admin'
+        ))
+    categorias_entrada = ['Recebimento de Medição','Antecipação de Contrato',
+        'Adiantamento','Reembolso de Despesas','Outras Receitas']
+    categorias_saida = ['Folha de Pagamento','INSS / FGTS','ISS','IRPJ / CSLL',
+        'PIS / COFINS','CBUQ / Massa Asfáltica','Emulsão Asfáltica','Combustível',
+        'Manutenção de Equipamentos','Aluguel de Equipamentos','Subempreiteiros',
+        'Material de Construção','Sinalização / EPI','Despesas Administrativas',
+        'Aluguel / Sede','Contador / Assessoria','Outras Despesas']
+    for name in categorias_entrada:
+        if not Category.query.filter_by(name=name, type='entrada').first():
+            db.session.add(Category(name=name, type='entrada', active=True))
+    for name in categorias_saida:
+        if not Category.query.filter_by(name=name, type='saida').first():
+            db.session.add(Category(name=name, type='saida', active=True))
+    db.session.commit()
+
+with app.app_context():
+    init_database()
+
 # ─── AUTH ────────────────────────────────────────────────────────────────────
 
 @app.route('/')
