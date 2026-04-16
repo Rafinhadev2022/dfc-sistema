@@ -67,6 +67,23 @@ with app.app_context():
     except Exception as e:
         print(f'[AVISO] Erro ao inicializar banco: {e}')
 
+# ─── HEALTH CHECK ────────────────────────────────────────────────────────────
+
+@app.route('/health')
+def health():
+    import traceback
+    try:
+        db.session.execute(db.text('SELECT 1'))
+        user_count = User.query.count()
+        return jsonify({
+            'status': 'ok',
+            'db': str(app.config['SQLALCHEMY_DATABASE_URI']),
+            'users': user_count,
+            'render_env': os.environ.get('RENDER','not set')
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e), 'trace': traceback.format_exc()}), 500
+
 # ─── AUTH ────────────────────────────────────────────────────────────────────
 
 @app.route('/')
