@@ -1,0 +1,15 @@
+name: Keep Alive - DFC Sistema
+
+on:
+  schedule:
+    - cron: '*/14 * * * *'   # a cada 14 minutos, 24h por dia
+  workflow_dispatch:          # permite rodar manualmente se precisar
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping DFC Sistema
+        run: |
+          curl -s -o /dev/null -w "Status: %{http_code} | Tempo: %{time_total}s" \
+            https://dfc-sistema.onrender.com/health
