@@ -115,6 +115,51 @@
   </div>
 </div>
 
+<!-- Widget lembretes -->
+{% if total_atrasados > 0 or total_proximos > 0 %}
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">
+      Contas a Pagar
+      {% if total_atrasados > 0 %}
+        <span class="badge badge-red" style="margin-left:8px">{{ total_atrasados }} atrasada(s)</span>
+      {% endif %}
+      {% if total_proximos > 0 %}
+        <span class="badge badge-yellow" style="margin-left:4px">{{ total_proximos }} vence(m) em 7 dias</span>
+      {% endif %}
+    </h2>
+    <a href="{{ url_for('lembretes') }}" class="btn btn-outline btn-sm">Ver todos</a>
+  </div>
+  <div class="panel-body" style="padding:0">
+    <table class="table" style="margin:0">
+      <thead>
+        <tr><th>Vencimento</th><th>Descrição</th><th>Centro de Custo</th><th class="text-right">Valor</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {% for b in lembretes_atrasados %}
+        <tr>
+          <td class="text-red font-bold nowrap">{{ b.due_date.strftime('%d/%m/%Y') }}</td>
+          <td>{{ b.description }}</td>
+          <td class="text-sm">{{ b.cost_center.name if b.cost_center else '—' }}</td>
+          <td class="text-right text-red font-bold nowrap">{{ "R$ {:,.2f}".format(b.value).replace(",","X").replace(".",",").replace("X",".") }}</td>
+          <td><span class="badge badge-red">Atrasado</span></td>
+        </tr>
+        {% endfor %}
+        {% for b in lembretes_proximos %}
+        <tr>
+          <td class="font-bold nowrap" style="color:#f59e0b">{{ b.due_date.strftime('%d/%m/%Y') }}</td>
+          <td>{{ b.description }}</td>
+          <td class="text-sm">{{ b.cost_center.name if b.cost_center else '—' }}</td>
+          <td class="text-right font-bold nowrap" style="color:#f59e0b">{{ "R$ {:,.2f}".format(b.value).replace(",","X").replace(".",",").replace("X",".") }}</td>
+          <td><span class="badge badge-yellow">Pendente</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <!-- Últimos lançamentos -->
 <div class="panel">
   <div class="panel-header">

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Centro de Custo{% endblock %}
+{% block page_title %}Centro de Custo{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Centros de Custo / Obras</h2>
+    {% if current_user.can_edit() %}
+    <a href="{{ url_for('centro_custo_novo') }}" class="btn btn-primary btn-sm">+ Novo Centro de Custo</a>
+    {% endif %}
+  </div>
+  <div class="panel-body">
+    {% if centros %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Nome / Obra</th>
+            <th>Descrição</th>
+            <th>Contrato Vinculado</th>
+            <th>Lançamentos</th>
+            <th>Status</th>
+            {% if current_user.can_edit() %}<th class="text-center">Ações</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for cc in centros %}
+          <tr class="{% if cc.status == 'inativo' %}row-inactive{% endif %}">
+            <td><span class="badge badge-gray">{{ cc.code or '—' }}</span></td>
+            <td><strong>{{ cc.name }}</strong></td>
+            <td class="text-sm text-gray">{{ cc.description or '—' }}</td>
+            <td class="text-sm">
+              {% if cc.contract %}
+                <span class="badge badge-blue">{{ cc.contract.number }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="text-center">
+              <span class="badge badge-gray">{{ cc.transactions|length }}</span>
+            </td>
+            <td>
+              <span class="badge {% if cc.status == 'ativo' %}badge-green{% else %}badge-gray{% endif %}">
+                {{ cc.status.capitalize() }}
+              </span>
+            </td>
+            {% if current_user.can_edit() %}
+            <td class="text-center nowrap">
+              <a href="{{ url_for('centro_custo_editar', id=cc.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              <form method="POST" action="{{ url_for('centro_custo_toggle', id=cc.id) }}" style="display:inline">
+                <button type="submit" class="btn btn-outline btn-xs">
+                  {{ 'Desativar' if cc.status == 'ativo' else 'Ativar' }}
+                </button>
+              </form>
+              {% if not cc.transactions and not cc.bill_reminders %}
+              <form method="POST" action="{{ url_for('centro_custo_excluir', id=cc.id) }}" style="display:inline"
+                    onsubmit="return confirm('Excluir este centro de custo?')">
+                <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+              </form>
+              {% endif %}
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+        <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon>
+        <line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line>
+      </svg>
+      <p>Nenhum centro de custo cadastrado.</p>
+      {% if current_user.can_edit() %}
+      <a href="{{ url_for('centro_custo_novo') }}" class="btn btn-primary">Cadastrar primeiro centro de custo</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel" style="max-width:680px">
+  <div class="panel-header">
+    <h2 class="panel-title" style="font-size:12px;color:var(--text-muted)">O que é Centro de Custo?</h2>
+  </div>
+  <div class="panel-body" style="font-size:13px;color:var(--text-muted);line-height:1.7">
+    <p>Cada <strong>obra ou contrato</strong> representa um centro de custo. Ao vincular um lançamento a um centro de custo, você consegue rastrear quanto cada obra gerou de receita e quanto custou — separado do fluxo geral da empresa.</p>
+  </div>
+</div>
+{% endblock %}

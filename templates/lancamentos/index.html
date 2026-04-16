@@ -72,6 +72,7 @@
             <th>Descrição</th>
             <th>Categoria</th>
             <th>Contrato</th>
+            <th>Centro de Custo</th>
             <th>Tipo</th>
             <th>Status</th>
             <th class="text-right">Valor</th>
@@ -85,6 +86,13 @@
             <td>{{ l.description }}</td>
             <td><span class="badge badge-gray">{{ l.category.name if l.category else '-' }}</span></td>
             <td class="text-sm text-gray">{{ l.contract.number if l.contract else '-' }}</td>
+            <td class="text-sm">
+              {% if l.cost_center %}
+                <span class="badge badge-purple" title="{{ l.cost_center.name }}">
+                  {{ l.cost_center.code or l.cost_center.name[:12] }}
+                </span>
+              {% else %}-{% endif %}
+            </td>
             <td>
               {% if l.type == 'entrada' %}
                 <span class="badge badge-green">Entrada</span>

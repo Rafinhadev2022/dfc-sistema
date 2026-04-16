@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{% if cc %}Editar Centro de Custo{% else %}Novo Centro de Custo{% endif %}{% endblock %}
+{% block page_title %}{% if cc %}Editar Centro de Custo{% else %}Novo Centro de Custo{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel panel-narrow">
+  <div class="panel-header">
+    <h2 class="panel-title">{% if cc %}Editar: {{ cc.name }}{% else %}Novo Centro de Custo{% endif %}</h2>
+    <a href="{{ url_for('centro_custo') }}" class="btn btn-outline btn-sm">← Voltar</a>
+  </div>
+  <div class="panel-body">
+    <form method="POST">
+      <div class="form-row">
+        <div class="form-group" style="flex:0 0 160px">
+          <label>Código <span style="font-size:11px;color:var(--text-muted)">(opcional)</span></label>
+          <input type="text" name="code" class="form-control" maxlength="30"
+            placeholder="Ex: CC-001"
+            value="{{ cc.code or '' if cc else '' }}">
+        </div>
+        <div class="form-group">
+          <label>Nome da Obra / Centro de Custo <span class="required">*</span></label>
+          <input type="text" name="name" class="form-control" required maxlength="150"
+            placeholder="Ex: Recapeamento Asfáltico Av. Brasil — Prefeitura de SP"
+            value="{{ cc.name if cc else '' }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Descrição</label>
+        <textarea name="description" class="form-control" rows="2"
+          placeholder="Detalhes adicionais sobre a obra ou centro de custo...">{{ cc.description or '' if cc else '' }}</textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Contrato Vinculado <span style="font-size:11px;color:var(--text-muted)">(opcional)</span></label>
+          <select name="contract_id" class="form-control">
+            <option value="">— Nenhum —</option>
+            {% for c in contratos %}
+            <option value="{{ c.id }}" {% if cc and cc.contract_id == c.id %}selected{% endif %}>
+              {{ c.number }} — {{ c.client }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        {% if cc %}
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status" class="form-control">
+            <option value="ativo" {% if cc.status == 'ativo' %}selected{% endif %}>Ativo</option>
+            <option value="inativo" {% if cc.status == 'inativo' %}selected{% endif %}>Inativo</option>
+          </select>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="form-actions">
+        <a href="{{ url_for('centro_custo') }}" class="btn btn-outline">Cancelar</a>
+        <button type="submit" class="btn btn-primary">
+          {% if cc %}Salvar Alterações{% else %}Cadastrar Centro de Custo{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

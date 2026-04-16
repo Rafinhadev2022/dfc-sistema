@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{% if lembrete %}Editar Lembrete{% else %}Novo Lembrete{% endif %}{% endblock %}
+{% block page_title %}{% if lembrete %}Editar Lembrete{% else %}Novo Lembrete{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel panel-narrow">
+  <div class="panel-header">
+    <h2 class="panel-title">{% if lembrete %}Editar Lembrete{% else %}Novo Lembrete de Conta a Pagar{% endif %}</h2>
+    <a href="{{ url_for('lembretes') }}" class="btn btn-outline btn-sm">← Voltar</a>
+  </div>
+  <div class="panel-body">
+    <form method="POST">
+
+      <div class="form-group">
+        <label>Descrição <span class="required">*</span></label>
+        <input type="text" name="description" class="form-control" required maxlength="255"
+          placeholder="Ex: Pagamento INSS competência Abril/2025"
+          value="{{ lembrete.description if lembrete else '' }}">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Valor (R$) <span class="required">*</span></label>
+          <input type="text" name="value" id="valor-input" class="form-control money-input" required
+            placeholder="0,00"
+            value="{{ '%.2f'|format(lembrete.value)|replace('.',',') if lembrete else '' }}">
+        </div>
+        <div class="form-group">
+          <label>Data de Vencimento <span class="required">*</span></label>
+          <input type="date" name="due_date" class="form-control" required
+            value="{{ lembrete.due_date.strftime('%Y-%m-%d') if lembrete else hoje.strftime('%Y-%m-%d') }}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Categoria</label>
+          <select name="category_id" class="form-control">
+            <option value="">— Selecione —</option>
+            {% for c in categorias %}
+            <option value="{{ c.id }}" {% if lembrete and lembrete.category_id == c.id %}selected{% endif %}>
+              {{ c.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Centro de Custo / Obra</label>
+          <select name="cost_center_id" class="form-control">
+            <option value="">— Nenhum —</option>
+            {% for cc in centros %}
+            <option value="{{ cc.id }}" {% if lembrete and lembrete.cost_center_id == cc.id %}selected{% endif %}>
+              {% if cc.code %}[{{ cc.code }}] {% endif %}{{ cc.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Recorrência</label>
+        <select name="recurrence" class="form-control">
+          <option value="nenhuma" {% if not lembrete or lembrete.recurrence == 'nenhuma' %}selected{% endif %}>Pagamento único</option>
+          <option value="mensal" {% if lembrete and lembrete.recurrence == 'mensal' %}selected{% endif %}>Mensal (repete todo mês)</option>
+          <option value="semanal" {% if lembrete and lembrete.recurrence == 'semanal' %}selected{% endif %}>Semanal (repete toda semana)</option>
+        </select>
+        <p style="font-size:11.5px;color:var(--text-muted);margin-top:4px">
+          Ao marcar como pago, um novo lembrete será criado automaticamente para o próximo período.
+        </p>
+      </div>
+
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="notes" class="form-control" rows="2"
+          placeholder="Informações adicionais...">{{ lembrete.notes or '' if lembrete else '' }}</textarea>
+      </div>
+
+      <div class="form-actions">
+        <a href="{{ url_for('lembretes') }}" class="btn btn-outline">Cancelar</a>
+        <button type="submit" class="btn btn-primary">
+          {% if lembrete %}Salvar Alterações{% else %}Criar Lembrete{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('valor-input').addEventListener('input', function(e) {
+  let v = e.target.value.replace(/\D/g, '');
+  v = (parseInt(v) / 100).toFixed(2);
+  e.target.value = isNaN(v) ? '' : v.replace('.', ',');
+});
+</script>
+{% endblock %}

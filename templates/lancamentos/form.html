@@ -32,6 +32,24 @@
           value="{{ lancamento.description if lancamento else '' }}">
       </div>
 
+      <div class="form-group">
+        <label>Centro de Custo / Obra</label>
+        <select name="cost_center_id" id="centro-select" class="form-control">
+          <option value="">— Nenhum —</option>
+          {% for cc in centros %}
+          <option value="{{ cc.id }}" {% if lancamento and lancamento.cost_center_id == cc.id %}selected{% endif %}>
+            {% if cc.code %}[{{ cc.code }}] {% endif %}{{ cc.name }}
+          </option>
+          {% endfor %}
+        </select>
+        {% if not centros %}
+        <p style="font-size:11.5px;color:#6b7280;margin-top:5px">
+          Nenhum centro de custo cadastrado.
+          <a href="{{ url_for('centro_custo_novo') }}" style="color:var(--accent)">Cadastrar agora</a>
+        </p>
+        {% endif %}
+      </div>
+
       <div class="form-row">
         <div class="form-group">
           <label>Categoria <span class="required">*</span></label>

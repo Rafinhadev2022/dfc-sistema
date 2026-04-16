@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Lembretes{% endblock %}
+{% block page_title %}Lembretes de Contas a Pagar{% endblock %}
+
+{% macro fmt(v) %}{{ "R$ {:,.2f}".format(v).replace(",","X").replace(".",",").replace("X",".") }}{% endmacro %}
+
+{% block content %}
+
+<!-- Alertas de resumo -->
+{% if atrasados > 0 %}
+<div class="alert-saldo-baixo" style="background:linear-gradient(135deg,#fee2e2,#fca5a5);border-color:#ef4444;color:#7f1d1d">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+  <strong>{{ atrasados }} conta(s) em atraso!</strong> Verifique os pagamentos pendentes abaixo.
+</div>
+{% endif %}
+
+<!-- Cards resumo -->
+<div class="cards-grid cards-grid-3">
+  <div class="card card-red">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg></div>
+    <div class="card-content">
+      <span class="card-label">Em Atraso</span>
+      <span class="card-value">{{ atrasados }}</span>
+    </div>
+  </div>
+  <div class="card card-orange">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+    <div class="card-content">
+      <span class="card-label">Vencem em 7 dias</span>
+      <span class="card-value">{{ proximos }}</span>
+    </div>
+  </div>
+  <div class="card card-green">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+    <div class="card-content">
+      <span class="card-label">Pagos (total)</span>
+      <span class="card-value">{{ lembretes|selectattr('status','equalto','pago')|list|length }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Filtros + botão novo -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Lembretes</h2>
+    <div style="display:flex;gap:8px">
+      <a href="{{ url_for('lembrete_novo') }}" class="btn btn-primary btn-sm">+ Novo Lembrete</a>
+    </div>
+  </div>
+  <div class="panel-body" style="padding-bottom:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="{{ url_for('lembretes') }}" class="btn {% if not status_filtro %}btn-primary{% else %}btn-outline{% endif %} btn-sm">Todos</a>
+      <a href="{{ url_for('lembretes', status='atrasado') }}" class="btn {% if status_filtro=='atrasado' %}btn-primary{% else %}btn-outline{% endif %} btn-sm">Atrasado</a>
+      <a href="{{ url_for('lembretes', status='pendente') }}" class="btn {% if status_filtro=='pendente' %}btn-primary{% else %}btn-outline{% endif %} btn-sm">Pendente</a>
+      <a href="{{ url_for('lembretes', status='pago') }}" class="btn {% if status_filtro=='pago' %}btn-primary{% else %}btn-outline{% endif %} btn-sm">Pago</a>
+      <a href="{{ url_for('lembretes', status='cancelado') }}" class="btn {% if status_filtro=='cancelado' %}btn-primary{% else %}btn-outline{% endif %} btn-sm">Cancelado</a>
+    </div>
+  </div>
+</div>
+
+<!-- Tabela -->
+<div class="panel">
+  <div class="panel-body">
+    {% if lembretes %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Vencimento</th>
+            <th>Descrição</th>
+            <th>Centro de Custo</th>
+            <th>Categoria</th>
+            <th>Recorrência</th>
+            <th class="text-right">Valor</th>
+            <th>Status</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in lembretes %}
+          {% set dias = (b.due_date - hoje).days %}
+          <tr>
+            <td class="nowrap">
+              <strong class="{% if b.status == 'atrasado' %}text-red{% elif dias <= 3 and b.status == 'pendente' %}text-orange{% endif %}">
+                {{ b.due_date.strftime('%d/%m/%Y') }}
+              </strong>
+              {% if b.status == 'atrasado' %}
+                <br><span style="font-size:10.5px;color:#ef4444">{{ dias|abs }} dia(s) em atraso</span>
+              {% elif b.status == 'pendente' and dias <= 7 %}
+                <br><span style="font-size:10.5px;color:#f59e0b">vence em {{ dias }} dia(s)</span>
+              {% endif %}
+            </td>
+            <td>
+              {{ b.description }}
+              {% if b.notes %}<br><span style="font-size:11px;color:var(--text-muted)">{{ b.notes[:60] }}</span>{% endif %}
+            </td>
+            <td class="text-sm">
+              {% if b.cost_center %}
+                <span class="badge badge-purple">{{ b.cost_center.code or b.cost_center.name[:14] }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td><span class="badge badge-gray">{{ b.category.name if b.category else '—' }}</span></td>
+            <td>
+              {% if b.recurrence == 'mensal' %}<span class="badge badge-blue">Mensal</span>
+              {% elif b.recurrence == 'semanal' %}<span class="badge badge-teal">Semanal</span>
+              {% else %}<span style="color:var(--text-muted);font-size:12px">—</span>{% endif %}
+            </td>
+            <td class="text-right font-bold text-red nowrap">{{ fmt(b.value) }}</td>
+            <td>
+              {% if b.status == 'atrasado' %}
+                <span class="badge badge-red">Atrasado</span>
+              {% elif b.status == 'pendente' %}
+                <span class="badge badge-yellow">Pendente</span>
+              {% elif b.status == 'pago' %}
+                <span class="badge badge-green">Pago</span>
+              {% else %}
+                <span class="badge badge-gray">Cancelado</span>
+              {% endif %}
+            </td>
+            <td class="text-center nowrap">
+              {% if b.status in ('pendente', 'atrasado') %}
+              <button class="btn btn-primary btn-xs" onclick="abrirModalPagar({{ b.id }}, '{{ b.description[:30] }}', '{{ b.due_date.strftime('%Y-%m-%d') }}')">
+                ✓ Pagar
+              </button>
+              <a href="{{ url_for('lembrete_editar', id=b.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              <form method="POST" action="{{ url_for('lembrete_cancelar', id=b.id) }}" style="display:inline" onsubmit="return confirm('Cancelar este lembrete?')">
+                <button type="submit" class="btn btn-outline btn-xs">Cancelar</button>
+              </form>
+              {% else %}
+              <a href="{{ url_for('lembrete_editar', id=b.id) }}" class="btn btn-outline btn-xs">Ver</a>
+              {% endif %}
+              <form method="POST" action="{{ url_for('lembrete_excluir', id=b.id) }}" style="display:inline" onsubmit="return confirm('Excluir este lembrete?')">
+                <button type="submit" class="btn btn-danger btn-xs">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+      </svg>
+      <p>Nenhum lembrete {% if status_filtro %}com este status {% endif %}cadastrado.</p>
+      <a href="{{ url_for('lembrete_novo') }}" class="btn btn-primary">Criar lembrete</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Modal Marcar como Pago -->
+<div id="modal-pagar" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:14px;padding:28px;width:380px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,0.2)">
+    <h3 style="font-size:16px;font-weight:700;margin-bottom:4px">Confirmar Pagamento</h3>
+    <p id="modal-desc" style="font-size:13px;color:var(--text-muted);margin-bottom:20px"></p>
+    <form id="form-pagar" method="POST">
+      <div class="form-group">
+        <label>Data do pagamento</label>
+        <input type="date" name="data_pagamento" id="modal-data" class="form-control" required>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button type="submit" class="btn btn-primary" style="flex:1">Confirmar Pagamento</button>
+        <button type="button" class="btn btn-outline" onclick="fecharModal()" style="flex:1">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function abrirModalPagar(id, desc, dataVenc) {
+  document.getElementById('modal-desc').textContent = desc;
+  document.getElementById('modal-data').value = new Date().toISOString().split('T')[0];
+  document.getElementById('form-pagar').action = '/lembretes/' + id + '/pagar';
+  const modal = document.getElementById('modal-pagar');
+  modal.style.display = 'flex';
+}
+function fecharModal() {
+  document.getElementById('modal-pagar').style.display = 'none';
+}
+document.getElementById('modal-pagar').addEventListener('click', function(e) {
+  if (e.target === this) fecharModal();
+});
+</script>
+{% endblock %}

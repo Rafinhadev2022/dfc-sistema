@@ -54,6 +54,18 @@ class Contract(db.Model):
     transactions = db.relationship('Transaction', backref='contract', lazy=True)
     projections = db.relationship('Projection', backref='contract', lazy=True)
 
+class CostCenter(db.Model):
+    __tablename__ = 'cost_centers'
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(30))
+    name = db.Column(db.String(150), nullable=False)
+    description = db.Column(db.Text)
+    contract_id = db.Column(db.Integer, db.ForeignKey('contracts.id'), nullable=True)
+    status = db.Column(db.String(10), default='ativo')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    transactions = db.relationship('Transaction', backref='cost_center', lazy=True)
+    bill_reminders = db.relationship('BillReminder', backref='cost_center', lazy=True)
+
 class Transaction(db.Model):
     __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
@@ -61,15 +73,34 @@ class Transaction(db.Model):
     description = db.Column(db.String(255), nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
     contract_id = db.Column(db.Integer, db.ForeignKey('contracts.id'), nullable=True)
+    cost_center_id = db.Column(db.Integer, db.ForeignKey('cost_centers.id'), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     value = db.Column(db.Float, nullable=False)
     type = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(15), default='realizado')
     notes = db.Column(db.Text)
-    attachment_data     = db.Column(db.LargeBinary)        # conteúdo do arquivo
-    attachment_original = db.Column(db.String(255))        # nome original
+    attachment_data     = db.Column(db.LargeBinary)
+    attachment_original = db.Column(db.String(255))
     attachment_mimetype = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class BillReminder(db.Model):
+    __tablename__ = 'bill_reminders'
+    id = db.Column(db.Integer, primary_key=True)
+    description = db.Column(db.String(255), nullable=False)
+    value = db.Column(db.Float, nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
+    cost_center_id = db.Column(db.Integer, db.ForeignKey('cost_centers.id'), nullable=True)
+    recurrence = db.Column(db.String(15), default='nenhuma')   # nenhuma / mensal / semanal
+    status = db.Column(db.String(15), default='pendente')      # pendente / pago / atrasado / cancelado
+    notes = db.Column(db.Text)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    paid_at = db.Column(db.DateTime)
+    transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True)
+    category = db.relationship('Category', backref='bill_reminders', lazy=True)
+    user = db.relationship('User', backref='bill_reminders', lazy=True)
 
 class Projection(db.Model):
     __tablename__ = 'projections'

@@ -1,6 +1,6 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken
+from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
@@ -87,31 +87,34 @@ def init_database():
             db.session.add(Category(name=name, type='saida', active=True))
     db.session.commit()
 
-    # Migração: adiciona colunas de anexo se não existirem
+    # Migração: adiciona colunas novas nas tabelas existentes
     from sqlalchemy import inspect as sa_inspect, text
     inspector = sa_inspect(db.engine)
-    existing_cols = {c['name'] for c in inspector.get_columns('transactions')}
     is_pg = 'postgresql' in str(app.config['SQLALCHEMY_DATABASE_URI'])
-    migrations = {
-        'attachment_data':     'BYTEA' if is_pg else 'BLOB',
-        'attachment_original': 'VARCHAR(255)',
-        'attachment_mimetype': 'VARCHAR(100)',
-    }
-    for col, col_type in migrations.items():
-        if col not in existing_cols:
-            try:
-                db.session.execute(text(f'ALTER TABLE transactions ADD COLUMN {col} {col_type}'))
-                db.session.commit()
-            except Exception:
-                db.session.rollback()
-    # Remove coluna legada de filename (filesystem) se existir — SQLite ignora DROP COLUMN em versões antigas
-    if 'attachment_filename' in existing_cols:
+
+    def add_col(table, col, col_type):
         try:
-            if is_pg:
-                db.session.execute(text('ALTER TABLE transactions DROP COLUMN attachment_filename'))
+            cols = {c['name'] for c in inspector.get_columns(table)}
+            if col not in cols:
+                db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {col_type}'))
                 db.session.commit()
         except Exception:
             db.session.rollback()
+
+    blob_type = 'BYTEA' if is_pg else 'BLOB'
+    add_col('transactions', 'attachment_data',     blob_type)
+    add_col('transactions', 'attachment_original', 'VARCHAR(255)')
+    add_col('transactions', 'attachment_mimetype', 'VARCHAR(100)')
+    add_col('transactions', 'cost_center_id',      'INTEGER')
+
+    # Remove coluna legada filesystem (PostgreSQL suporta DROP COLUMN)
+    try:
+        existing_t = {c['name'] for c in inspector.get_columns('transactions')}
+        if 'attachment_filename' in existing_t and is_pg:
+            db.session.execute(text('ALTER TABLE transactions DROP COLUMN attachment_filename'))
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 with app.app_context():
     try:
@@ -262,6 +265,24 @@ def dashboard():
     limite_alerta = float(os.environ.get('ALERTA_SALDO', 10000))
     alerta_saldo = saldo_total < limite_alerta
 
+    # Lembretes no dashboard
+    BillReminder.query.filter(
+        BillReminder.status == 'pendente',
+        BillReminder.due_date < hoje
+    ).update({'status': 'atrasado'})
+    db.session.commit()
+
+    lembretes_atrasados = BillReminder.query.filter_by(status='atrasado').order_by(BillReminder.due_date).limit(5).all()
+    lembretes_proximos = BillReminder.query.filter(
+        BillReminder.status == 'pendente',
+        BillReminder.due_date <= hoje + timedelta(days=7)
+    ).order_by(BillReminder.due_date).limit(5).all()
+    total_atrasados = BillReminder.query.filter_by(status='atrasado').count()
+    total_proximos = BillReminder.query.filter(
+        BillReminder.status == 'pendente',
+        BillReminder.due_date <= hoje + timedelta(days=7)
+    ).count()
+
     return render_template('dashboard.html',
         entradas_mes=entradas_mes, saidas_mes=saidas_mes,
         saldo_mes=saldo_mes, saldo_total=saldo_total,
@@ -275,6 +296,10 @@ def dashboard():
         pizza_values=json.dumps(pizza_values),
         alerta_saldo=alerta_saldo,
         limite_alerta=limite_alerta,
+        lembretes_atrasados=lembretes_atrasados,
+        lembretes_proximos=lembretes_proximos,
+        total_atrasados=total_atrasados,
+        total_proximos=total_proximos,
         hoje=hoje
     )
 
@@ -316,6 +341,7 @@ def lancamentos():
 def lancamento_novo():
     categorias = Category.query.filter_by(active=True).order_by(Category.type, Category.name).all()
     contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
+    centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -324,6 +350,7 @@ def lancamento_novo():
                 description=request.form['description'].strip(),
                 category_id=int(request.form['category_id']),
                 contract_id=int(request.form['contract_id']) if request.form.get('contract_id') else None,
+                cost_center_id=int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None,
                 value=float(valor_str),
                 type=request.form['type'],
                 status=request.form['status'],
@@ -335,7 +362,8 @@ def lancamento_novo():
                 if not allowed_file(arquivo.filename):
                     flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
                     return render_template('lancamentos/form.html', lancamento=None,
-                                           categorias=categorias, contratos=contratos, hoje=date.today())
+                                           categorias=categorias, contratos=contratos,
+                                           centros=centros, hoje=date.today())
                 t.attachment_data = arquivo.read()
                 t.attachment_original = arquivo.filename
                 t.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
@@ -347,7 +375,7 @@ def lancamento_novo():
             db.session.rollback()
             flash(f'Erro ao salvar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=None, categorias=categorias,
-                           contratos=contratos, hoje=date.today())
+                           contratos=contratos, centros=centros, hoje=date.today())
 
 @app.route('/lancamentos/<int:id>/editar', methods=['GET', 'POST'])
 @login_required
@@ -355,6 +383,7 @@ def lancamento_editar(id):
     t = Transaction.query.get_or_404(id)
     categorias = Category.query.filter_by(active=True).order_by(Category.type, Category.name).all()
     contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
+    centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -362,6 +391,7 @@ def lancamento_editar(id):
             t.description = request.form['description'].strip()
             t.category_id = int(request.form['category_id'])
             t.contract_id = int(request.form['contract_id']) if request.form.get('contract_id') else None
+            t.cost_center_id = int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None
             t.value = float(valor_str)
             t.type = request.form['type']
             t.status = request.form['status']
@@ -371,7 +401,7 @@ def lancamento_editar(id):
                 if not allowed_file(arquivo.filename):
                     flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
                     return render_template('lancamentos/form.html', lancamento=t,
-                                           categorias=categorias, contratos=contratos)
+                                           categorias=categorias, contratos=contratos, centros=centros)
                 t.attachment_data = arquivo.read()
                 t.attachment_original = arquivo.filename
                 t.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
@@ -381,7 +411,8 @@ def lancamento_editar(id):
         except Exception as e:
             db.session.rollback()
             flash(f'Erro ao atualizar: {str(e)}', 'danger')
-    return render_template('lancamentos/form.html', lancamento=t, categorias=categorias, contratos=contratos)
+    return render_template('lancamentos/form.html', lancamento=t, categorias=categorias,
+                           contratos=contratos, centros=centros)
 
 @app.route('/lancamentos/<int:id>/anexo')
 @login_required
@@ -1119,6 +1150,229 @@ def categoria_excluir(id):
 def api_categorias(tipo):
     cats = Category.query.filter_by(type=tipo, active=True).order_by(Category.name).all()
     return jsonify([{'id': c.id, 'name': c.name} for c in cats])
+
+@app.route('/api/centros-custo')
+@login_required
+def api_centros_custo():
+    ccs = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
+    return jsonify([{'id': c.id, 'name': c.name, 'code': c.code or ''} for c in ccs])
+
+# ─── CENTRO DE CUSTO ──────────────────────────────────────────────────────────
+
+@app.route('/centro-custo')
+@login_required
+def centro_custo():
+    ccs = CostCenter.query.order_by(CostCenter.status.desc(), CostCenter.name).all()
+    return render_template('centro_custo/index.html', centros=ccs)
+
+@app.route('/centro-custo/novo', methods=['GET', 'POST'])
+@login_required
+def centro_custo_novo():
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('centro_custo'))
+    contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
+    if request.method == 'POST':
+        cc = CostCenter(
+            code=request.form.get('code', '').strip() or None,
+            name=request.form['name'].strip(),
+            description=request.form.get('description', '').strip(),
+            contract_id=int(request.form['contract_id']) if request.form.get('contract_id') else None,
+            status='ativo'
+        )
+        db.session.add(cc)
+        db.session.commit()
+        flash('Centro de custo criado!', 'success')
+        return redirect(url_for('centro_custo'))
+    return render_template('centro_custo/form.html', cc=None, contratos=contratos)
+
+@app.route('/centro-custo/<int:id>/editar', methods=['GET', 'POST'])
+@login_required
+def centro_custo_editar(id):
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('centro_custo'))
+    cc = CostCenter.query.get_or_404(id)
+    contratos = Contract.query.order_by(Contract.number).all()
+    if request.method == 'POST':
+        cc.code = request.form.get('code', '').strip() or None
+        cc.name = request.form['name'].strip()
+        cc.description = request.form.get('description', '').strip()
+        cc.contract_id = int(request.form['contract_id']) if request.form.get('contract_id') else None
+        cc.status = request.form.get('status', 'ativo')
+        db.session.commit()
+        flash('Centro de custo atualizado!', 'success')
+        return redirect(url_for('centro_custo'))
+    return render_template('centro_custo/form.html', cc=cc, contratos=contratos)
+
+@app.route('/centro-custo/<int:id>/toggle', methods=['POST'])
+@login_required
+def centro_custo_toggle(id):
+    cc = CostCenter.query.get_or_404(id)
+    cc.status = 'inativo' if cc.status == 'ativo' else 'ativo'
+    db.session.commit()
+    return redirect(url_for('centro_custo'))
+
+@app.route('/centro-custo/<int:id>/excluir', methods=['POST'])
+@login_required
+def centro_custo_excluir(id):
+    cc = CostCenter.query.get_or_404(id)
+    if cc.transactions or cc.bill_reminders:
+        flash('Não é possível excluir: existem lançamentos ou lembretes vinculados.', 'warning')
+    else:
+        db.session.delete(cc)
+        db.session.commit()
+        flash('Centro de custo excluído.', 'success')
+    return redirect(url_for('centro_custo'))
+
+# ─── LEMBRETES DE CONTAS A PAGAR ──────────────────────────────────────────────
+
+@app.route('/lembretes')
+@login_required
+def lembretes():
+    hoje = date.today()
+    # Atualiza status de pendentes atrasados automaticamente
+    BillReminder.query.filter(
+        BillReminder.status == 'pendente',
+        BillReminder.due_date < hoje
+    ).update({'status': 'atrasado'})
+    db.session.commit()
+
+    status_filtro = request.args.get('status', '')
+    q = BillReminder.query
+    if status_filtro:
+        q = q.filter(BillReminder.status == status_filtro)
+    lembretes = q.order_by(BillReminder.due_date.asc()).all()
+
+    # Contadores para badges
+    atrasados = BillReminder.query.filter_by(status='atrasado').count()
+    proximos  = BillReminder.query.filter(
+        BillReminder.status == 'pendente',
+        BillReminder.due_date <= hoje + timedelta(days=7)
+    ).count()
+
+    categorias = Category.query.filter_by(type='saida', active=True).order_by(Category.name).all()
+    centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
+    return render_template('lembretes/index.html',
+        lembretes=lembretes, hoje=hoje,
+        atrasados=atrasados, proximos=proximos,
+        status_filtro=status_filtro,
+        categorias=categorias, centros=centros)
+
+@app.route('/lembretes/novo', methods=['GET', 'POST'])
+@login_required
+def lembrete_novo():
+    categorias = Category.query.filter_by(type='saida', active=True).order_by(Category.name).all()
+    centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
+    if request.method == 'POST':
+        valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
+        b = BillReminder(
+            description=request.form['description'].strip(),
+            value=float(valor_str),
+            due_date=datetime.strptime(request.form['due_date'], '%Y-%m-%d').date(),
+            category_id=int(request.form['category_id']) if request.form.get('category_id') else None,
+            cost_center_id=int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None,
+            recurrence=request.form.get('recurrence', 'nenhuma'),
+            status='pendente',
+            notes=request.form.get('notes', '').strip(),
+            user_id=current_user.id
+        )
+        db.session.add(b)
+        db.session.commit()
+        flash('Lembrete criado!', 'success')
+        return redirect(url_for('lembretes'))
+    return render_template('lembretes/form.html', lembrete=None,
+                           categorias=categorias, centros=centros, hoje=date.today())
+
+@app.route('/lembretes/<int:id>/editar', methods=['GET', 'POST'])
+@login_required
+def lembrete_editar(id):
+    b = BillReminder.query.get_or_404(id)
+    categorias = Category.query.filter_by(type='saida', active=True).order_by(Category.name).all()
+    centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
+    if request.method == 'POST':
+        valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
+        b.description = request.form['description'].strip()
+        b.value = float(valor_str)
+        b.due_date = datetime.strptime(request.form['due_date'], '%Y-%m-%d').date()
+        b.category_id = int(request.form['category_id']) if request.form.get('category_id') else None
+        b.cost_center_id = int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None
+        b.recurrence = request.form.get('recurrence', 'nenhuma')
+        b.notes = request.form.get('notes', '').strip()
+        if b.status in ('atrasado', 'pendente'):
+            b.status = 'pendente' if b.due_date >= date.today() else 'atrasado'
+        db.session.commit()
+        flash('Lembrete atualizado!', 'success')
+        return redirect(url_for('lembretes'))
+    return render_template('lembretes/form.html', lembrete=b,
+                           categorias=categorias, centros=centros, hoje=date.today())
+
+@app.route('/lembretes/<int:id>/pagar', methods=['POST'])
+@login_required
+def lembrete_pagar(id):
+    b = BillReminder.query.get_or_404(id)
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('lembretes'))
+    data_pgto_str = request.form.get('data_pagamento', '')
+    data_pgto = datetime.strptime(data_pgto_str, '%Y-%m-%d').date() if data_pgto_str else date.today()
+    # Cria lançamento automaticamente
+    t = Transaction(
+        date=data_pgto,
+        description=f'[Lembrete] {b.description}',
+        category_id=b.category_id,
+        cost_center_id=b.cost_center_id,
+        value=b.value,
+        type='saida',
+        status='realizado',
+        notes=b.notes,
+        user_id=current_user.id
+    )
+    db.session.add(t)
+    db.session.flush()
+    b.status = 'pago'
+    b.paid_at = datetime.utcnow()
+    b.transaction_id = t.id
+    # Se recorrente, cria próximo lembrete
+    if b.recurrence == 'mensal':
+        proximo = BillReminder(
+            description=b.description, value=b.value,
+            due_date=b.due_date + relativedelta(months=1),
+            category_id=b.category_id, cost_center_id=b.cost_center_id,
+            recurrence=b.recurrence, status='pendente',
+            notes=b.notes, user_id=current_user.id
+        )
+        db.session.add(proximo)
+    elif b.recurrence == 'semanal':
+        proximo = BillReminder(
+            description=b.description, value=b.value,
+            due_date=b.due_date + timedelta(weeks=1),
+            category_id=b.category_id, cost_center_id=b.cost_center_id,
+            recurrence=b.recurrence, status='pendente',
+            notes=b.notes, user_id=current_user.id
+        )
+        db.session.add(proximo)
+    db.session.commit()
+    flash('Conta marcada como paga! Lançamento registrado automaticamente.', 'success')
+    return redirect(url_for('lembretes'))
+
+@app.route('/lembretes/<int:id>/cancelar', methods=['POST'])
+@login_required
+def lembrete_cancelar(id):
+    b = BillReminder.query.get_or_404(id)
+    b.status = 'cancelado'
+    db.session.commit()
+    flash('Lembrete cancelado.', 'success')
+    return redirect(url_for('lembretes'))
+
+@app.route('/lembretes/<int:id>/excluir', methods=['POST'])
+@login_required
+def lembrete_excluir(id):
+    b = BillReminder.query.get_or_404(id)
+    db.session.delete(b)
+    db.session.commit()
+    flash('Lembrete excluído.', 'success')
+    return redirect(url_for('lembretes'))
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────
 
