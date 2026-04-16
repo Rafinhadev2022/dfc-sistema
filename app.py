@@ -29,6 +29,12 @@ else:
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024  # 15 MB máximo
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,      # testa conexão antes de usar, reconecta se caiu
+    'pool_recycle': 300,        # recicla conexões a cada 5 min
+    'pool_size': 5,
+    'max_overflow': 2,
+}
 
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
