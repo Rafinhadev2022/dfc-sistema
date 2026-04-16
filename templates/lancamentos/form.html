@@ -84,7 +84,7 @@
       <div class="form-group">
         <label>Comprovante / Nota Fiscal</label>
 
-        {% if lancamento and lancamento.attachment_filename %}
+        {% if lancamento and lancamento.attachment_data %}
         <div class="anexo-atual">
           <div class="anexo-info">
             <span class="anexo-icon">
@@ -98,6 +98,7 @@
           </div>
           <div class="anexo-acoes">
             <a href="{{ url_for('lancamento_anexo', id=lancamento.id) }}" target="_blank" class="btn btn-outline btn-xs">Visualizar</a>
+            <a href="{{ url_for('lancamento_anexo_download', id=lancamento.id) }}" class="btn btn-outline btn-xs">⬇ Baixar</a>
             {% if current_user.can_edit() %}
             <form method="POST" action="{{ url_for('lancamento_anexo_excluir', id=lancamento.id) }}" style="display:inline" onsubmit="return confirm('Remover o anexo?')">
               <button type="submit" class="btn btn-danger btn-xs">Remover</button>

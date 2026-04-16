@@ -7,10 +7,9 @@ from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 from sqlalchemy import func, extract
-import json, os, io, csv, uuid, mimetypes
+import json, os, io, csv, mimetypes
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dfc-sistema-chave-secreta-2024')
@@ -33,31 +32,8 @@ app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024  # 15 MB máximo
 
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
-def get_upload_folder():
-    if os.environ.get('RENDER'):
-        folder = '/tmp/uploads'
-    else:
-        folder = os.path.join(app.instance_path, 'uploads')
-    os.makedirs(folder, exist_ok=True)
-    return folder
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def save_attachment(file_obj):
-    """Salva o arquivo e retorna (filename_servidor, nome_original, mimetype)."""
-    original = file_obj.filename
-    ext = original.rsplit('.', 1)[1].lower() if '.' in original else 'bin'
-    filename = f"{uuid.uuid4().hex}.{ext}"
-    file_obj.save(os.path.join(get_upload_folder(), filename))
-    mime = file_obj.mimetype or mimetypes.guess_type(original)[0] or 'application/octet-stream'
-    return filename, original, mime
-
-def delete_attachment_file(filename):
-    if filename:
-        path = os.path.join(get_upload_folder(), filename)
-        if os.path.exists(path):
-            os.remove(path)
 
 db.init_app(app)
 login_manager = LoginManager(app)
@@ -110,6 +86,32 @@ def init_database():
         if not Category.query.filter_by(name=name, type='saida').first():
             db.session.add(Category(name=name, type='saida', active=True))
     db.session.commit()
+
+    # Migração: adiciona colunas de anexo se não existirem
+    from sqlalchemy import inspect as sa_inspect, text
+    inspector = sa_inspect(db.engine)
+    existing_cols = {c['name'] for c in inspector.get_columns('transactions')}
+    is_pg = 'postgresql' in str(app.config['SQLALCHEMY_DATABASE_URI'])
+    migrations = {
+        'attachment_data':     'BYTEA' if is_pg else 'BLOB',
+        'attachment_original': 'VARCHAR(255)',
+        'attachment_mimetype': 'VARCHAR(100)',
+    }
+    for col, col_type in migrations.items():
+        if col not in existing_cols:
+            try:
+                db.session.execute(text(f'ALTER TABLE transactions ADD COLUMN {col} {col_type}'))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+    # Remove coluna legada de filename (filesystem) se existir — SQLite ignora DROP COLUMN em versões antigas
+    if 'attachment_filename' in existing_cols:
+        try:
+            if is_pg:
+                db.session.execute(text('ALTER TABLE transactions DROP COLUMN attachment_filename'))
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
 
 with app.app_context():
     try:
@@ -334,7 +336,9 @@ def lancamento_novo():
                     flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
                     return render_template('lancamentos/form.html', lancamento=None,
                                            categorias=categorias, contratos=contratos, hoje=date.today())
-                t.attachment_filename, t.attachment_original, t.attachment_mimetype = save_attachment(arquivo)
+                t.attachment_data = arquivo.read()
+                t.attachment_original = arquivo.filename
+                t.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
             db.session.add(t)
             db.session.commit()
             flash('Lançamento registrado com sucesso!', 'success')
@@ -368,8 +372,9 @@ def lancamento_editar(id):
                     flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
                     return render_template('lancamentos/form.html', lancamento=t,
                                            categorias=categorias, contratos=contratos)
-                delete_attachment_file(t.attachment_filename)
-                t.attachment_filename, t.attachment_original, t.attachment_mimetype = save_attachment(arquivo)
+                t.attachment_data = arquivo.read()
+                t.attachment_original = arquivo.filename
+                t.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
             db.session.commit()
             flash('Lançamento atualizado com sucesso!', 'success')
             return redirect(url_for('lancamentos'))
@@ -382,15 +387,29 @@ def lancamento_editar(id):
 @login_required
 def lancamento_anexo(id):
     t = Transaction.query.get_or_404(id)
-    if not t.attachment_filename:
+    if not t.attachment_data:
         flash('Este lançamento não possui anexo.', 'warning')
         return redirect(url_for('lancamentos'))
-    path = os.path.join(get_upload_folder(), t.attachment_filename)
-    if not os.path.exists(path):
-        flash('Arquivo não encontrado no servidor.', 'danger')
+    return send_file(
+        io.BytesIO(t.attachment_data),
+        mimetype=t.attachment_mimetype or 'application/octet-stream',
+        as_attachment=False,
+        download_name=t.attachment_original or 'anexo'
+    )
+
+@app.route('/lancamentos/<int:id>/anexo/download')
+@login_required
+def lancamento_anexo_download(id):
+    t = Transaction.query.get_or_404(id)
+    if not t.attachment_data:
+        flash('Este lançamento não possui anexo.', 'warning')
         return redirect(url_for('lancamentos'))
-    return send_file(path, mimetype=t.attachment_mimetype,
-                     as_attachment=False, download_name=t.attachment_original)
+    return send_file(
+        io.BytesIO(t.attachment_data),
+        mimetype=t.attachment_mimetype or 'application/octet-stream',
+        as_attachment=True,
+        download_name=t.attachment_original or 'anexo'
+    )
 
 @app.route('/lancamentos/<int:id>/anexo/excluir', methods=['POST'])
 @login_required
@@ -399,8 +418,7 @@ def lancamento_anexo_excluir(id):
     if not current_user.can_edit():
         flash('Sem permissão.', 'danger')
         return redirect(url_for('lancamento_editar', id=id))
-    delete_attachment_file(t.attachment_filename)
-    t.attachment_filename = None
+    t.attachment_data = None
     t.attachment_original = None
     t.attachment_mimetype = None
     db.session.commit()
