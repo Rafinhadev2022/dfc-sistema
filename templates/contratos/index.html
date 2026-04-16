@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Contratos{% endblock %}
+{% block page_title %}Contratos{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Contratos</h2>
+    <a href="{{ url_for('contrato_novo') }}" class="btn btn-primary btn-sm">+ Novo Contrato</a>
+  </div>
+  <div class="panel-body">
+    <!-- Filtro -->
+    <form method="GET" class="filter-form mb-3">
+      <div class="filter-grid filter-grid-sm">
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status" class="form-control" onchange="this.form.submit()">
+            <option value="">Todos</option>
+            <option value="ativo" {% if filtro_status == 'ativo' %}selected{% endif %}>Ativo</option>
+            <option value="encerrado" {% if filtro_status == 'encerrado' %}selected{% endif %}>Encerrado</option>
+            <option value="suspenso" {% if filtro_status == 'suspenso' %}selected{% endif %}>Suspenso</option>
+          </select>
+        </div>
+      </div>
+    </form>
+
+    {% if contratos %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Nº Contrato</th>
+            <th>Cliente / Prefeitura</th>
+            <th>Descrição</th>
+            <th class="text-right">Valor</th>
+            <th>Início</th>
+            <th>Término</th>
+            <th>Status</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in contratos %}
+          <tr>
+            <td class="font-bold nowrap">{{ c.number }}</td>
+            <td>{{ c.client }}</td>
+            <td class="text-sm">{{ c.description[:60] + '...' if c.description and c.description|length > 60 else c.description or '-' }}</td>
+            <td class="text-right font-bold text-blue nowrap">
+              {{ "R$ {:,.2f}".format(c.value).replace(",","X").replace(".",",").replace("X",".") }}
+            </td>
+            <td class="nowrap">{{ c.start_date.strftime('%d/%m/%Y') }}</td>
+            <td class="nowrap">{{ c.end_date.strftime('%d/%m/%Y') if c.end_date else '—' }}</td>
+            <td>
+              {% if c.status == 'ativo' %}
+                <span class="badge badge-green">Ativo</span>
+              {% elif c.status == 'encerrado' %}
+                <span class="badge badge-gray">Encerrado</span>
+              {% else %}
+                <span class="badge badge-yellow">Suspenso</span>
+              {% endif %}
+            </td>
+            <td class="text-center nowrap">
+              <a href="{{ url_for('contrato_editar', id=c.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              <form method="POST" action="{{ url_for('contrato_excluir', id=c.id) }}" style="display:inline"
+                onsubmit="return confirm('Excluir este contrato? Os lançamentos vinculados perderão o vínculo.')">
+                <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="text-sm text-gray mt-2">Total: {{ contratos|length }} contrato(s)</p>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+      <p>Nenhum contrato cadastrado.</p>
+      <a href="{{ url_for('contrato_novo') }}" class="btn btn-primary">+ Novo Contrato</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

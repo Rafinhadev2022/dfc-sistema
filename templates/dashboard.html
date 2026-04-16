@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<!-- Cards de resumo -->
+<div class="cards-grid">
+  <div class="card card-green">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Entradas no Mês</span>
+      <span class="card-value">{{ "R$ {:,.2f}".format(entradas_mes).replace(",","X").replace(".",",").replace("X",".") }}</span>
+    </div>
+  </div>
+
+  <div class="card card-red">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline><polyline points="17 18 23 18 23 12"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saídas no Mês</span>
+      <span class="card-value">{{ "R$ {:,.2f}".format(saidas_mes).replace(",","X").replace(".",",").replace("X",".") }}</span>
+    </div>
+  </div>
+
+  <div class="card {% if saldo_mes >= 0 %}card-blue{% else %}card-orange{% endif %}">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saldo do Mês</span>
+      <span class="card-value">{{ "R$ {:,.2f}".format(saldo_mes).replace(",","X").replace(".",",").replace("X",".") }}</span>
+    </div>
+  </div>
+
+  <div class="card {% if saldo_total >= 0 %}card-purple{% else %}card-orange{% endif %}">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saldo Acumulado</span>
+      <span class="card-value">{{ "R$ {:,.2f}".format(saldo_total).replace(",","X").replace(".",",").replace("X",".") }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Segunda linha de cards -->
+<div class="cards-grid cards-grid-3">
+  <div class="card card-gray">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Contratos Ativos</span>
+      <span class="card-value">{{ contratos_ativos }}</span>
+    </div>
+  </div>
+  <div class="card card-teal">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Prev. Entradas (30d)</span>
+      <span class="card-value">{{ "R$ {:,.2f}".format(prev_entradas).replace(",","X").replace(".",",").replace("X",".") }}</span>
+    </div>
+  </div>
+  <div class="card card-orange">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Prev. Saídas (30d)</span>
+      <span class="card-value">{{ "R$ {:,.2f}".format(prev_saidas).replace(",","X").replace(".",",").replace("X",".") }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Gráfico -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Fluxo de Caixa — Últimos 6 Meses</h2>
+  </div>
+  <div class="panel-body chart-container">
+    <canvas id="fluxoChart"></canvas>
+  </div>
+</div>
+
+<!-- Últimos lançamentos -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Lançamentos Recentes</h2>
+    <a href="{{ url_for('lancamento_novo') }}" class="btn btn-primary btn-sm">+ Novo Lançamento</a>
+  </div>
+  <div class="panel-body">
+    {% if lancamentos_recentes %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Tipo</th>
+            <th>Valor</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in lancamentos_recentes %}
+          <tr>
+            <td>{{ l.date.strftime('%d/%m/%Y') }}</td>
+            <td>{{ l.description }}</td>
+            <td><span class="badge badge-gray">{{ l.category.name if l.category else '-' }}</span></td>
+            <td>
+              {% if l.type == 'entrada' %}
+                <span class="badge badge-green">Entrada</span>
+              {% else %}
+                <span class="badge badge-red">Saída</span>
+              {% endif %}
+            </td>
+            <td class="{% if l.type == 'entrada' %}text-green{% else %}text-red{% endif %} font-bold">
+              {{ "R$ {:,.2f}".format(l.value).replace(",","X").replace(".",",").replace("X",".") }}
+            </td>
+            <td>
+              <span class="badge {% if l.status == 'realizado' %}badge-blue{% else %}badge-yellow{% endif %}">
+                {{ l.status.capitalize() }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="text-center mt-2">
+      <a href="{{ url_for('lancamentos') }}" class="btn btn-outline btn-sm">Ver todos os lançamentos</a>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+      <p>Nenhum lançamento registrado ainda.</p>
+      <a href="{{ url_for('lancamento_novo') }}" class="btn btn-primary">Registrar primeiro lançamento</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ctx = document.getElementById('fluxoChart').getContext('2d');
+new Chart(ctx, {
+  type: 'bar',
+  data: {
+    labels: {{ meses_labels|safe }},
+    datasets: [
+      {
+        label: 'Entradas',
+        data: {{ meses_entradas|safe }},
+        backgroundColor: 'rgba(34,197,94,0.7)',
+        borderColor: 'rgba(22,163,74,1)',
+        borderWidth: 1,
+        borderRadius: 4,
+      },
+      {
+        label: 'Saídas',
+        data: {{ meses_saidas|safe }},
+        backgroundColor: 'rgba(239,68,68,0.7)',
+        borderColor: 'rgba(220,38,38,1)',
+        borderWidth: 1,
+        borderRadius: 4,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'top' },
+      tooltip: {
+        callbacks: {
+          label: ctx => ' R$ ' + ctx.parsed.y.toLocaleString('pt-BR', {minimumFractionDigits:2})
+        }
+      }
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+        ticks: {
+          callback: v => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2})
+        }
+      }
+    }
+  }
+});
+</script>
+{% endblock %}

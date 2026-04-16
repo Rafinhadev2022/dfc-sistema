@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}Projeções{% endblock %}
+{% block page_title %}Projeções de Caixa{% endblock %}
+
+{% block content %}
+<div class="cards-grid cards-grid-3">
+  <div class="card card-gray">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saldo Atual Realizado</span>
+      <span class="card-value {% if saldo_atual >= 0 %}text-green{% else %}text-red{% endif %}">
+        {{ "R$ {:,.2f}".format(saldo_atual).replace(",","X").replace(".",",").replace("X",".") }}
+      </span>
+    </div>
+  </div>
+  <div class="card card-green">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Entradas Previstas</span>
+      <span class="card-value">
+        {{ "R$ {:,.2f}".format(projecoes|selectattr('type','eq','entrada')|sum(attribute='value')).replace(",","X").replace(".",",").replace("X",".") }}
+      </span>
+    </div>
+  </div>
+  <div class="card card-red">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saídas Previstas</span>
+      <span class="card-value">
+        {{ "R$ {:,.2f}".format(projecoes|selectattr('type','eq','saida')|sum(attribute='value')).replace(",","X").replace(".",",").replace("X",".") }}
+      </span>
+    </div>
+  </div>
+</div>
+
+<!-- Gráfico de Projeção -->
+{% if proj_labels != '[]' %}
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Evolução do Saldo Projetado</h2>
+  </div>
+  <div class="panel-body chart-container">
+    <canvas id="projecaoChart"></canvas>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel-row">
+  <!-- Nova Projeção -->
+  <div class="panel panel-half">
+    <div class="panel-header">
+      <h2 class="panel-title">Adicionar Projeção</h2>
+    </div>
+    <div class="panel-body">
+      <form method="POST" action="{{ url_for('projecao_nova') }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Tipo <span class="required">*</span></label>
+            <select name="type" id="tipo-proj" class="form-control" required onchange="filtrarCatProj(this.value)">
+              <option value="entrada">Entrada</option>
+              <option value="saida">Saída</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Data <span class="required">*</span></label>
+            <input type="date" name="date" class="form-control" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Descrição <span class="required">*</span></label>
+          <input type="text" name="description" class="form-control" required maxlength="255" placeholder="Ex: Recebimento medição março">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Categoria <span class="required">*</span></label>
+            <select name="category_id" id="cat-proj" class="form-control" required>
+              <option value="">Selecione...</option>
+              {% for c in categorias %}
+              <option value="{{ c.id }}" data-type="{{ c.type }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Valor (R$) <span class="required">*</span></label>
+            <input type="text" name="value" id="valor-proj" class="form-control money-input" required placeholder="0,00">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Contrato</label>
+          <select name="contract_id" class="form-control">
+            <option value="">Nenhum</option>
+            {% for c in contratos %}
+            <option value="{{ c.id }}">{{ c.number }} — {{ c.client }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Observações</label>
+          <textarea name="notes" class="form-control" rows="2" placeholder="Opcional..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Adicionar Projeção</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Filtros -->
+  <div class="panel panel-half">
+    <div class="panel-header">
+      <h2 class="panel-title">Filtrar Período</h2>
+    </div>
+    <div class="panel-body">
+      <form method="GET">
+        <div class="form-group">
+          <label>Data Inicial</label>
+          <input type="date" name="data_ini" class="form-control" value="{{ filtros.data_ini }}">
+        </div>
+        <div class="form-group">
+          <label>Data Final</label>
+          <input type="date" name="data_fim" class="form-control" value="{{ filtros.data_fim }}">
+        </div>
+        <div class="form-group">
+          <label>Tipo</label>
+          <select name="tipo" class="form-control">
+            <option value="">Todos</option>
+            <option value="entrada" {% if filtros.tipo == 'entrada' %}selected{% endif %}>Entrada</option>
+            <option value="saida" {% if filtros.tipo == 'saida' %}selected{% endif %}>Saída</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Filtrar</button>
+        <a href="{{ url_for('projecoes') }}" class="btn btn-outline btn-block mt-1">Limpar</a>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Lista de projeções -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Projeções Cadastradas</h2>
+  </div>
+  <div class="panel-body">
+    {% if projecoes %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Contrato</th>
+            <th>Tipo</th>
+            <th class="text-right">Valor</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in projecoes %}
+          <tr>
+            <td class="nowrap">{{ p.date.strftime('%d/%m/%Y') }}</td>
+            <td>{{ p.description }}</td>
+            <td><span class="badge badge-gray">{{ p.category.name if p.category else '-' }}</span></td>
+            <td class="text-sm text-gray">{{ p.contract.number if p.contract else '-' }}</td>
+            <td>
+              {% if p.type == 'entrada' %}
+                <span class="badge badge-green">Entrada</span>
+              {% else %}
+                <span class="badge badge-red">Saída</span>
+              {% endif %}
+            </td>
+            <td class="text-right font-bold {% if p.type == 'entrada' %}text-green{% else %}text-red{% endif %} nowrap">
+              {{ "R$ {:,.2f}".format(p.value).replace(",","X").replace(".",",").replace("X",".") }}
+            </td>
+            <td class="text-center nowrap">
+              <form method="POST" action="{{ url_for('projecao_realizar', id=p.id) }}" style="display:inline"
+                onsubmit="return confirm('Lançar esta projeção como realizada?')">
+                <button type="submit" class="btn btn-primary btn-xs">✓ Realizar</button>
+              </form>
+              <form method="POST" action="{{ url_for('projecao_excluir', id=p.id) }}" style="display:inline"
+                onsubmit="return confirm('Excluir esta projeção?')">
+                <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+      <p>Nenhuma projeção cadastrada para o período.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+{% if proj_labels != '[]' %}
+const ctx2 = document.getElementById('projecaoChart').getContext('2d');
+new Chart(ctx2, {
+  type: 'line',
+  data: {
+    labels: {{ proj_labels|safe }},
+    datasets: [{
+      label: 'Saldo Projetado',
+      data: {{ proj_saldos|safe }},
+      borderColor: 'rgba(99,102,241,1)',
+      backgroundColor: 'rgba(99,102,241,0.1)',
+      borderWidth: 2,
+      fill: true,
+      tension: 0.3,
+      pointRadius: 3,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      tooltip: {
+        callbacks: {
+          label: ctx => ' R$ ' + ctx.parsed.y.toLocaleString('pt-BR', {minimumFractionDigits:2})
+        }
+      }
+    },
+    scales: {
+      y: {
+        ticks: { callback: v => 'R$ ' + v.toLocaleString('pt-BR', {minimumFractionDigits:2}) }
+      }
+    }
+  }
+});
+{% endif %}
+
+function filtrarCatProj(tipo) {
+  const select = document.getElementById('cat-proj');
+  select.querySelectorAll('option').forEach(opt => {
+    if (!opt.value) return;
+    opt.style.display = (!tipo || opt.dataset.type === tipo) ? '' : 'none';
+  });
+  select.value = '';
+}
+
+document.getElementById('valor-proj').addEventListener('input', function(e) {
+  let v = e.target.value.replace(/\D/g, '');
+  v = (parseInt(v) / 100).toFixed(2);
+  e.target.value = isNaN(v) ? '' : v.replace('.', ',');
+});
+
+document.addEventListener('DOMContentLoaded', () => filtrarCatProj('entrada'));
+</script>
+{% endblock %}

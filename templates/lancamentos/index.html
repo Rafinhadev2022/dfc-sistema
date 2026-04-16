@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Lançamentos{% endblock %}
+{% block page_title %}Lançamentos{% endblock %}
+
+{% block content %}
+<!-- Filtros -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Filtros</h2>
+    <a href="{{ url_for('lancamento_novo') }}" class="btn btn-primary btn-sm">+ Novo Lançamento</a>
+  </div>
+  <div class="panel-body">
+    <form method="GET" class="filter-form">
+      <div class="filter-grid">
+        <div class="form-group">
+          <label>Tipo</label>
+          <select name="tipo" class="form-control">
+            <option value="">Todos</option>
+            <option value="entrada" {% if filtros.tipo == 'entrada' %}selected{% endif %}>Entrada</option>
+            <option value="saida" {% if filtros.tipo == 'saida' %}selected{% endif %}>Saída</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status" class="form-control">
+            <option value="">Todos</option>
+            <option value="realizado" {% if filtros.status == 'realizado' %}selected{% endif %}>Realizado</option>
+            <option value="previsto" {% if filtros.status == 'previsto' %}selected{% endif %}>Previsto</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Categoria</label>
+          <select name="categoria_id" class="form-control">
+            <option value="">Todas</option>
+            {% for c in categorias %}
+            <option value="{{ c.id }}" {% if filtros.categoria_id == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Data Inicial</label>
+          <input type="date" name="data_ini" class="form-control" value="{{ filtros.data_ini }}">
+        </div>
+        <div class="form-group">
+          <label>Data Final</label>
+          <input type="date" name="data_fim" class="form-control" value="{{ filtros.data_fim }}">
+        </div>
+        <div class="form-group form-group-btn">
+          <button type="submit" class="btn btn-primary">Filtrar</button>
+          <a href="{{ url_for('lancamentos') }}" class="btn btn-outline">Limpar</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Tabela -->
+<div class="panel">
+  <div class="panel-body">
+    {% if lancamentos.items %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Contrato</th>
+            <th>Tipo</th>
+            <th>Status</th>
+            <th class="text-right">Valor</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in lancamentos.items %}
+          <tr>
+            <td class="nowrap">{{ l.date.strftime('%d/%m/%Y') }}</td>
+            <td>{{ l.description }}</td>
+            <td><span class="badge badge-gray">{{ l.category.name if l.category else '-' }}</span></td>
+            <td class="text-sm text-gray">{{ l.contract.number if l.contract else '-' }}</td>
+            <td>
+              {% if l.type == 'entrada' %}
+                <span class="badge badge-green">Entrada</span>
+              {% else %}
+                <span class="badge badge-red">Saída</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge {% if l.status == 'realizado' %}badge-blue{% else %}badge-yellow{% endif %}">
+                {{ l.status.capitalize() }}
+              </span>
+            </td>
+            <td class="text-right font-bold {% if l.type == 'entrada' %}text-green{% else %}text-red{% endif %} nowrap">
+              {{ "R$ {:,.2f}".format(l.value).replace(",","X").replace(".",",").replace("X",".") }}
+            </td>
+            <td class="text-center nowrap">
+              <a href="{{ url_for('lancamento_editar', id=l.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              <form method="POST" action="{{ url_for('lancamento_excluir', id=l.id) }}" style="display:inline" onsubmit="return confirm('Excluir este lançamento?')">
+                <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Paginação -->
+    {% if lancamentos.pages > 1 %}
+    <div class="pagination">
+      {% if lancamentos.has_prev %}
+        <a href="{{ url_for('lancamentos', page=lancamentos.prev_num, **filtros) }}" class="btn btn-outline btn-sm">← Anterior</a>
+      {% endif %}
+      <span class="page-info">Página {{ lancamentos.page }} de {{ lancamentos.pages }} ({{ lancamentos.total }} registros)</span>
+      {% if lancamentos.has_next %}
+        <a href="{{ url_for('lancamentos', page=lancamentos.next_num, **filtros) }}" class="btn btn-outline btn-sm">Próxima →</a>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="text-sm text-gray mt-2">Total: {{ lancamentos.total }} registro(s)</p>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+      <p>Nenhum lançamento encontrado.</p>
+      <a href="{{ url_for('lancamento_novo') }}" class="btn btn-primary">+ Novo Lançamento</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

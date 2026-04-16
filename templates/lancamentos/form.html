@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}{% if lancamento %}Editar Lançamento{% else %}Novo Lançamento{% endif %}{% endblock %}
+{% block page_title %}{% if lancamento %}Editar Lançamento{% else %}Novo Lançamento{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel panel-narrow">
+  <div class="panel-header">
+    <h2 class="panel-title">{% if lancamento %}Editar Lançamento #{{ lancamento.id }}{% else %}Registrar Novo Lançamento{% endif %}</h2>
+    <a href="{{ url_for('lancamentos') }}" class="btn btn-outline btn-sm">← Voltar</a>
+  </div>
+  <div class="panel-body">
+    <form method="POST">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Tipo <span class="required">*</span></label>
+          <select name="type" id="tipo-select" class="form-control" required onchange="filtrarCategorias(this.value)">
+            <option value="entrada" {% if lancamento and lancamento.type == 'entrada' %}selected{% endif %}>Entrada</option>
+            <option value="saida" {% if lancamento and lancamento.type == 'saida' %}selected{% endif %}>Saída</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Data <span class="required">*</span></label>
+          <input type="date" name="date" class="form-control" required
+            value="{{ lancamento.date.strftime('%Y-%m-%d') if lancamento else hoje.strftime('%Y-%m-%d') if hoje else '' }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Descrição <span class="required">*</span></label>
+        <input type="text" name="description" class="form-control" required maxlength="255"
+          placeholder="Ex: Recebimento medição contrato 001/2024"
+          value="{{ lancamento.description if lancamento else '' }}">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Categoria <span class="required">*</span></label>
+          <select name="category_id" id="categoria-select" class="form-control" required>
+            <option value="">Selecione...</option>
+            {% for c in categorias %}
+            <option value="{{ c.id }}"
+              data-type="{{ c.type }}"
+              {% if lancamento and lancamento.category_id == c.id %}selected{% endif %}>
+              {{ c.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Contrato Vinculado</label>
+          <select name="contract_id" class="form-control">
+            <option value="">Nenhum</option>
+            {% for c in contratos %}
+            <option value="{{ c.id }}" {% if lancamento and lancamento.contract_id == c.id %}selected{% endif %}>
+              {{ c.number }} — {{ c.client }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Valor (R$) <span class="required">*</span></label>
+          <input type="text" name="value" id="valor-input" class="form-control money-input" required
+            placeholder="0,00"
+            value="{{ '%.2f'|format(lancamento.value)|replace('.',',') if lancamento else '' }}">
+        </div>
+        <div class="form-group">
+          <label>Status <span class="required">*</span></label>
+          <select name="status" class="form-control" required>
+            <option value="realizado" {% if not lancamento or lancamento.status == 'realizado' %}selected{% endif %}>Realizado</option>
+            <option value="previsto" {% if lancamento and lancamento.status == 'previsto' %}selected{% endif %}>Previsto</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="notes" class="form-control" rows="3" placeholder="Informações adicionais...">{{ lancamento.notes if lancamento else '' }}</textarea>
+      </div>
+
+      <div class="form-actions">
+        <a href="{{ url_for('lancamentos') }}" class="btn btn-outline">Cancelar</a>
+        <button type="submit" class="btn btn-primary">
+          {% if lancamento %}Salvar Alterações{% else %}Registrar Lançamento{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filtrarCategorias(tipo) {
+  const select = document.getElementById('categoria-select');
+  const options = select.querySelectorAll('option');
+  const valorAtual = select.value;
+  options.forEach(opt => {
+    if (!opt.value) return;
+    opt.style.display = (!tipo || opt.dataset.type === tipo) ? '' : 'none';
+  });
+  if (select.querySelector(`option[value="${valorAtual}"]`)?.style.display === 'none') {
+    select.value = '';
+  }
+}
+
+// Mask de valor monetário
+document.getElementById('valor-input').addEventListener('input', function(e) {
+  let v = e.target.value.replace(/\D/g, '');
+  v = (parseInt(v) / 100).toFixed(2);
+  e.target.value = isNaN(v) ? '' : v.replace('.', ',');
+});
+
+// Inicializar filtro de categorias
+document.addEventListener('DOMContentLoaded', () => {
+  filtrarCategorias(document.getElementById('tipo-select').value);
+});
+</script>
+{% endblock %}

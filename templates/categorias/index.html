@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Categorias{% endblock %}
+{% block page_title %}Categorias{% endblock %}
+
+{% block content %}
+<div class="panel-row">
+  <!-- Nova Categoria -->
+  <div class="panel panel-third">
+    <div class="panel-header">
+      <h2 class="panel-title">Nova Categoria</h2>
+    </div>
+    <div class="panel-body">
+      <form method="POST" action="{{ url_for('categoria_nova') }}">
+        <div class="form-group">
+          <label>Nome <span class="required">*</span></label>
+          <input type="text" name="name" class="form-control" required maxlength="100" placeholder="Ex: Combustível">
+        </div>
+        <div class="form-group">
+          <label>Tipo <span class="required">*</span></label>
+          <select name="type" class="form-control" required>
+            <option value="entrada">Entrada</option>
+            <option value="saida" selected>Saída</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Criar Categoria</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Lista -->
+  <div class="panel panel-two-thirds">
+    <div class="panel-header">
+      <h2 class="panel-title">Categorias Cadastradas</h2>
+    </div>
+    <div class="panel-body">
+      <div class="panel-row" style="gap:1rem">
+        <!-- Entradas -->
+        <div style="flex:1">
+          <h3 class="section-subtitle text-green">Entradas</h3>
+          <table class="table">
+            <thead><tr><th>Nome</th><th class="text-center">Status</th><th class="text-center">Ações</th></tr></thead>
+            <tbody>
+              {% for c in categorias if c.type == 'entrada' %}
+              <tr class="{% if not c.active %}row-inactive{% endif %}">
+                <td>{{ c.name }}</td>
+                <td class="text-center">
+                  <span class="badge {% if c.active %}badge-green{% else %}badge-gray{% endif %}">
+                    {{ 'Ativa' if c.active else 'Inativa' }}
+                  </span>
+                </td>
+                <td class="text-center nowrap">
+                  <form method="POST" action="{{ url_for('categoria_toggle', id=c.id) }}" style="display:inline">
+                    <button type="submit" class="btn btn-outline btn-xs">
+                      {{ 'Desativar' if c.active else 'Ativar' }}
+                    </button>
+                  </form>
+                  {% if not c.transactions %}
+                  <form method="POST" action="{{ url_for('categoria_excluir', id=c.id) }}" style="display:inline"
+                    onsubmit="return confirm('Excluir categoria?')">
+                    <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="text-gray text-center">Nenhuma categoria de entrada.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Saídas -->
+        <div style="flex:1">
+          <h3 class="section-subtitle text-red">Saídas</h3>
+          <table class="table">
+            <thead><tr><th>Nome</th><th class="text-center">Status</th><th class="text-center">Ações</th></tr></thead>
+            <tbody>
+              {% for c in categorias if c.type == 'saida' %}
+              <tr class="{% if not c.active %}row-inactive{% endif %}">
+                <td>{{ c.name }}</td>
+                <td class="text-center">
+                  <span class="badge {% if c.active %}badge-green{% else %}badge-gray{% endif %}">
+                    {{ 'Ativa' if c.active else 'Inativa' }}
+                  </span>
+                </td>
+                <td class="text-center nowrap">
+                  <form method="POST" action="{{ url_for('categoria_toggle', id=c.id) }}" style="display:inline">
+                    <button type="submit" class="btn btn-outline btn-xs">
+                      {{ 'Desativar' if c.active else 'Ativar' }}
+                    </button>
+                  </form>
+                  {% if not c.transactions %}
+                  <form method="POST" action="{{ url_for('categoria_excluir', id=c.id) }}" style="display:inline"
+                    onsubmit="return confirm('Excluir categoria?')">
+                    <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="3" class="text-gray text-center">Nenhuma categoria de saída.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
