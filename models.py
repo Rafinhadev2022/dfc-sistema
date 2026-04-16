@@ -66,6 +66,9 @@ class Transaction(db.Model):
     type = db.Column(db.String(10), nullable=False)
     status = db.Column(db.String(15), default='realizado')
     notes = db.Column(db.Text)
+    attachment_filename = db.Column(db.String(255))       # nome gerado no servidor
+    attachment_original = db.Column(db.String(255))       # nome original do arquivo
+    attachment_mimetype = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Projection(db.Model):

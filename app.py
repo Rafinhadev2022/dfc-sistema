@@ -7,9 +7,10 @@ from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 from sqlalchemy import func, extract
-import json, os, io, csv
+import json, os, io, csv, uuid, mimetypes
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dfc-sistema-chave-secreta-2024')
@@ -28,6 +29,35 @@ else:
     app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['MAX_CONTENT_LENGTH'] = 15 * 1024 * 1024  # 15 MB máximo
+
+ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp'}
+
+def get_upload_folder():
+    if os.environ.get('RENDER'):
+        folder = '/tmp/uploads'
+    else:
+        folder = os.path.join(app.instance_path, 'uploads')
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def save_attachment(file_obj):
+    """Salva o arquivo e retorna (filename_servidor, nome_original, mimetype)."""
+    original = file_obj.filename
+    ext = original.rsplit('.', 1)[1].lower() if '.' in original else 'bin'
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    file_obj.save(os.path.join(get_upload_folder(), filename))
+    mime = file_obj.mimetype or mimetypes.guess_type(original)[0] or 'application/octet-stream'
+    return filename, original, mime
+
+def delete_attachment_file(filename):
+    if filename:
+        path = os.path.join(get_upload_folder(), filename)
+        if os.path.exists(path):
+            os.remove(path)
 
 db.init_app(app)
 login_manager = LoginManager(app)
@@ -298,6 +328,13 @@ def lancamento_novo():
                 notes=request.form.get('notes', '').strip(),
                 user_id=current_user.id
             )
+            arquivo = request.files.get('attachment')
+            if arquivo and arquivo.filename:
+                if not allowed_file(arquivo.filename):
+                    flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
+                    return render_template('lancamentos/form.html', lancamento=None,
+                                           categorias=categorias, contratos=contratos, hoje=date.today())
+                t.attachment_filename, t.attachment_original, t.attachment_mimetype = save_attachment(arquivo)
             db.session.add(t)
             db.session.commit()
             flash('Lançamento registrado com sucesso!', 'success')
@@ -305,7 +342,8 @@ def lancamento_novo():
         except Exception as e:
             db.session.rollback()
             flash(f'Erro ao salvar: {str(e)}', 'danger')
-    return render_template('lancamentos/form.html', lancamento=None, categorias=categorias, contratos=contratos)
+    return render_template('lancamentos/form.html', lancamento=None, categorias=categorias,
+                           contratos=contratos, hoje=date.today())
 
 @app.route('/lancamentos/<int:id>/editar', methods=['GET', 'POST'])
 @login_required
@@ -324,6 +362,14 @@ def lancamento_editar(id):
             t.type = request.form['type']
             t.status = request.form['status']
             t.notes = request.form.get('notes', '').strip()
+            arquivo = request.files.get('attachment')
+            if arquivo and arquivo.filename:
+                if not allowed_file(arquivo.filename):
+                    flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
+                    return render_template('lancamentos/form.html', lancamento=t,
+                                           categorias=categorias, contratos=contratos)
+                delete_attachment_file(t.attachment_filename)
+                t.attachment_filename, t.attachment_original, t.attachment_mimetype = save_attachment(arquivo)
             db.session.commit()
             flash('Lançamento atualizado com sucesso!', 'success')
             return redirect(url_for('lancamentos'))
@@ -331,6 +377,35 @@ def lancamento_editar(id):
             db.session.rollback()
             flash(f'Erro ao atualizar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=t, categorias=categorias, contratos=contratos)
+
+@app.route('/lancamentos/<int:id>/anexo')
+@login_required
+def lancamento_anexo(id):
+    t = Transaction.query.get_or_404(id)
+    if not t.attachment_filename:
+        flash('Este lançamento não possui anexo.', 'warning')
+        return redirect(url_for('lancamentos'))
+    path = os.path.join(get_upload_folder(), t.attachment_filename)
+    if not os.path.exists(path):
+        flash('Arquivo não encontrado no servidor.', 'danger')
+        return redirect(url_for('lancamentos'))
+    return send_file(path, mimetype=t.attachment_mimetype,
+                     as_attachment=False, download_name=t.attachment_original)
+
+@app.route('/lancamentos/<int:id>/anexo/excluir', methods=['POST'])
+@login_required
+def lancamento_anexo_excluir(id):
+    t = Transaction.query.get_or_404(id)
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('lancamento_editar', id=id))
+    delete_attachment_file(t.attachment_filename)
+    t.attachment_filename = None
+    t.attachment_original = None
+    t.attachment_mimetype = None
+    db.session.commit()
+    flash('Anexo removido.', 'success')
+    return redirect(url_for('lancamento_editar', id=id))
 
 @app.route('/lancamentos/<int:id>/excluir', methods=['POST'])
 @login_required
