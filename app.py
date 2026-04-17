@@ -79,15 +79,18 @@ def run_migrations():
             db.session.rollback()
             print(f'[MIGRAÇÃO] add_col {table}.{col}: {e}')
 
+    bool_default_true  = 'BOOLEAN DEFAULT TRUE'  if is_pg else 'BOOLEAN DEFAULT 1'
+    bool_default_false = 'BOOLEAN DEFAULT FALSE' if is_pg else 'BOOLEAN DEFAULT 0'
+
     # users
-    add_col('users', 'active', 'BOOLEAN DEFAULT 1')
+    add_col('users', 'active', bool_default_true)
 
     # transactions
     add_col('transactions', 'attachment_data',     blob_type)
     add_col('transactions', 'attachment_original', 'VARCHAR(255)')
     add_col('transactions', 'attachment_mimetype', 'VARCHAR(100)')
     add_col('transactions', 'cost_center_id',      'INTEGER')
-    add_col('transactions', 'reconciled',          'BOOLEAN DEFAULT 0')
+    add_col('transactions', 'reconciled',          bool_default_false)
     add_col('transactions', 'reconciled_at',       'TIMESTAMP')
     add_col('transactions', 'bank_reference',      'VARCHAR(120)')
 
