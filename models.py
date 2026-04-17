@@ -82,6 +82,9 @@ class Transaction(db.Model):
     attachment_data     = db.Column(db.LargeBinary)
     attachment_original = db.Column(db.String(255))
     attachment_mimetype = db.Column(db.String(100))
+    reconciled          = db.Column(db.Boolean, default=False)
+    reconciled_at       = db.Column(db.DateTime)
+    bank_reference      = db.Column(db.String(120))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class BillReminder(db.Model):

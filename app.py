@@ -87,6 +87,9 @@ def run_migrations():
     add_col('transactions', 'attachment_original', 'VARCHAR(255)')
     add_col('transactions', 'attachment_mimetype', 'VARCHAR(100)')
     add_col('transactions', 'cost_center_id',      'INTEGER')
+    add_col('transactions', 'reconciled',          'BOOLEAN DEFAULT 0')
+    add_col('transactions', 'reconciled_at',       'TIMESTAMP')
+    add_col('transactions', 'bank_reference',      'VARCHAR(120)')
 
     # bill_reminders
     add_col('bill_reminders', 'attachment_data',     blob_type)
@@ -1466,6 +1469,108 @@ def lembrete_excluir(id):
     db.session.commit()
     flash('Lembrete excluído.', 'success')
     return redirect(url_for('lembretes'))
+
+# ─── CONCILIAÇÃO BANCÁRIA ────────────────────────────────────────────────────
+
+@app.route('/conciliacao')
+@login_required
+def conciliacao():
+    hoje = date.today()
+    mes_str = request.args.get('mes', hoje.strftime('%Y-%m'))
+    status_filtro = request.args.get('status', 'todos')  # todos / pendente / conciliado
+    try:
+        ano, mes = map(int, mes_str.split('-'))
+        inicio = date(ano, mes, 1)
+        fim = date(ano + (1 if mes == 12 else 0), (1 if mes == 12 else mes + 1), 1) - timedelta(days=1)
+    except Exception:
+        inicio = hoje.replace(day=1)
+        fim = hoje
+
+    q = Transaction.query.filter(
+        Transaction.date >= inicio,
+        Transaction.date <= fim,
+        Transaction.status == 'realizado'
+    )
+    if status_filtro == 'pendente':
+        q = q.filter((Transaction.reconciled == False) | (Transaction.reconciled.is_(None)))
+    elif status_filtro == 'conciliado':
+        q = q.filter(Transaction.reconciled == True)
+    lancamentos = q.order_by(Transaction.date.asc(), Transaction.id.asc()).all()
+
+    # Totais do período (sem filtro de status)
+    periodo = Transaction.query.filter(
+        Transaction.date >= inicio,
+        Transaction.date <= fim,
+        Transaction.status == 'realizado'
+    ).all()
+    total_qtd = len(periodo)
+    conciliados_qtd = sum(1 for t in periodo if t.reconciled)
+    pendentes_qtd = total_qtd - conciliados_qtd
+    total_entradas = sum(t.value for t in periodo if t.type == 'entrada')
+    total_saidas = sum(t.value for t in periodo if t.type == 'saida')
+    conciliado_entradas = sum(t.value for t in periodo if t.type == 'entrada' and t.reconciled)
+    conciliado_saidas = sum(t.value for t in periodo if t.type == 'saida' and t.reconciled)
+    pendente_entradas = total_entradas - conciliado_entradas
+    pendente_saidas = total_saidas - conciliado_saidas
+    pct = round((conciliados_qtd / total_qtd * 100), 1) if total_qtd else 0
+
+    return render_template('conciliacao/index.html',
+        lancamentos=lancamentos, mes_str=mes_str, status_filtro=status_filtro,
+        inicio=inicio, fim=fim,
+        total_qtd=total_qtd, conciliados_qtd=conciliados_qtd, pendentes_qtd=pendentes_qtd,
+        total_entradas=total_entradas, total_saidas=total_saidas,
+        conciliado_entradas=conciliado_entradas, conciliado_saidas=conciliado_saidas,
+        pendente_entradas=pendente_entradas, pendente_saidas=pendente_saidas,
+        pct=pct)
+
+@app.route('/conciliacao/toggle/<int:id>', methods=['POST'])
+@login_required
+def conciliacao_toggle(id):
+    if not current_user.can_edit():
+        return jsonify({'ok': False, 'error': 'sem permissão'}), 403
+    t = Transaction.query.get_or_404(id)
+    t.reconciled = not bool(t.reconciled)
+    t.reconciled_at = datetime.utcnow() if t.reconciled else None
+    ref = request.form.get('bank_reference', '').strip()
+    if ref:
+        t.bank_reference = ref[:120]
+    db.session.commit()
+    return jsonify({
+        'ok': True, 'reconciled': bool(t.reconciled),
+        'reconciled_at': t.reconciled_at.strftime('%d/%m/%Y %H:%M') if t.reconciled_at else None
+    })
+
+@app.route('/conciliacao/marcar-todos', methods=['POST'])
+@login_required
+def conciliacao_marcar_todos():
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('conciliacao'))
+    mes_str = request.form.get('mes', date.today().strftime('%Y-%m'))
+    acao = request.form.get('acao', 'conciliar')
+    try:
+        ano, mes = map(int, mes_str.split('-'))
+        inicio = date(ano, mes, 1)
+        fim = date(ano + (1 if mes == 12 else 0), (1 if mes == 12 else mes + 1), 1) - timedelta(days=1)
+    except Exception:
+        flash('Período inválido.', 'danger')
+        return redirect(url_for('conciliacao'))
+    valor_reconciled = (acao == 'conciliar')
+    agora = datetime.utcnow() if valor_reconciled else None
+    qs = Transaction.query.filter(
+        Transaction.date >= inicio, Transaction.date <= fim,
+        Transaction.status == 'realizado'
+    ).all()
+    cnt = 0
+    for t in qs:
+        if bool(t.reconciled) != valor_reconciled:
+            t.reconciled = valor_reconciled
+            t.reconciled_at = agora
+            cnt += 1
+    db.session.commit()
+    verbo = 'conciliados' if valor_reconciled else 'desmarcados'
+    flash(f'{cnt} lançamento(s) {verbo} no período.', 'success')
+    return redirect(url_for('conciliacao', mes=mes_str))
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────
 

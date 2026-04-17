@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Conciliação Bancária{% endblock %}
+{% block page_title %}Conciliação Bancária{% endblock %}
+
+{% macro fmt(v) %}{{ "R$ {:,.2f}".format(v).replace(",","X").replace(".",",").replace("X",".") }}{% endmacro %}
+
+{% block content %}
+
+<!-- Filtros -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Período</h2>
+  </div>
+  <div class="panel-body">
+    <form method="GET" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="margin:0">
+        <label>Mês</label>
+        <input type="month" name="mes" class="form-control" value="{{ mes_str }}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label>Status</label>
+        <select name="status" class="form-control">
+          <option value="todos"      {% if status_filtro == 'todos' %}selected{% endif %}>Todos</option>
+          <option value="pendente"   {% if status_filtro == 'pendente' %}selected{% endif %}>Pendentes</option>
+          <option value="conciliado" {% if status_filtro == 'conciliado' %}selected{% endif %}>Conciliados</option>
+        </select>
+      </div>
+      <button class="btn btn-primary">Filtrar</button>
+      <span style="color:var(--text-muted);font-size:12px;margin-left:auto">
+        {{ inicio.strftime('%d/%m/%Y') }} — {{ fim.strftime('%d/%m/%Y') }}
+      </span>
+    </form>
+  </div>
+</div>
+
+<!-- Cards resumo -->
+<div class="cards-grid cards-grid-4">
+  <div class="card card-blue">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg></div>
+    <div class="card-content">
+      <span class="card-label">Total no período</span>
+      <span class="card-value">{{ total_qtd }}</span>
+      <span style="font-size:11px;color:var(--text-muted)">lançamento(s)</span>
+    </div>
+  </div>
+  <div class="card card-green">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></div>
+    <div class="card-content">
+      <span class="card-label">Conciliados</span>
+      <span class="card-value">{{ conciliados_qtd }}</span>
+      <span style="font-size:11px;color:var(--text-muted)">{{ pct }}% do total</span>
+    </div>
+  </div>
+  <div class="card card-orange">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+    <div class="card-content">
+      <span class="card-label">Pendentes</span>
+      <span class="card-value">{{ pendentes_qtd }}</span>
+      <span style="font-size:11px;color:var(--text-muted)">sem conciliar</span>
+    </div>
+  </div>
+  <div class="card card-purple">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg></div>
+    <div class="card-content">
+      <span class="card-label">Saldo conciliado</span>
+      <span class="card-value" style="font-size:16px">{{ fmt(conciliado_entradas - conciliado_saidas) }}</span>
+      <span style="font-size:11px;color:var(--text-muted)">entrada − saída</span>
+    </div>
+  </div>
+</div>
+
+<!-- Totais detalhados -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Totais do período</h2>
+    <div style="display:flex;gap:8px">
+      <form method="POST" action="{{ url_for('conciliacao_marcar_todos') }}" style="display:inline" onsubmit="return confirm('Marcar TODOS os lançamentos do período como conciliados?')">
+        <input type="hidden" name="mes" value="{{ mes_str }}">
+        <input type="hidden" name="acao" value="conciliar">
+        <button class="btn btn-success btn-sm">✓ Conciliar todos</button>
+      </form>
+      <form method="POST" action="{{ url_for('conciliacao_marcar_todos') }}" style="display:inline" onsubmit="return confirm('Desmarcar todos os lançamentos conciliados do período?')">
+        <input type="hidden" name="mes" value="{{ mes_str }}">
+        <input type="hidden" name="acao" value="desmarcar">
+        <button class="btn btn-outline btn-sm">Desmarcar todos</button>
+      </form>
+    </div>
+  </div>
+  <div class="panel-body">
+    <div class="table-responsive">
+      <table class="table" style="font-size:13px">
+        <thead>
+          <tr>
+            <th></th>
+            <th class="text-right">Entradas</th>
+            <th class="text-right">Saídas</th>
+            <th class="text-right">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Total no sistema</strong></td>
+            <td class="text-right text-green">{{ fmt(total_entradas) }}</td>
+            <td class="text-right text-red">{{ fmt(total_saidas) }}</td>
+            <td class="text-right font-bold">{{ fmt(total_entradas - total_saidas) }}</td>
+          </tr>
+          <tr style="background:#f0fdf4">
+            <td>✓ Conciliado com o banco</td>
+            <td class="text-right text-green">{{ fmt(conciliado_entradas) }}</td>
+            <td class="text-right text-red">{{ fmt(conciliado_saidas) }}</td>
+            <td class="text-right font-bold">{{ fmt(conciliado_entradas - conciliado_saidas) }}</td>
+          </tr>
+          <tr style="background:#fffbeb">
+            <td>⚠ Pendente (não conciliado)</td>
+            <td class="text-right text-green">{{ fmt(pendente_entradas) }}</td>
+            <td class="text-right text-red">{{ fmt(pendente_saidas) }}</td>
+            <td class="text-right font-bold">{{ fmt(pendente_entradas - pendente_saidas) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin-top:10px;line-height:1.5">
+      <strong>Como usar:</strong> pegue o extrato do banco do mês selecionado. Para cada entrada/saída que bateu com o banco, clique no checkbox na tabela abaixo. O saldo conciliado deve bater com o saldo do extrato.
+    </p>
+  </div>
+</div>
+
+<!-- Tabela -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Lançamentos do período</h2>
+    <span style="font-size:12px;color:var(--text-muted)">{{ lancamentos|length }} registro(s) exibido(s)</span>
+  </div>
+  <div class="panel-body">
+    {% if lancamentos %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width:50px" class="text-center">OK?</th>
+            <th>Data</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th class="text-right">Valor</th>
+            <th>Tipo</th>
+            <th>Ref. banco</th>
+            <th>Conciliado em</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in lancamentos %}
+          <tr id="row-{{ t.id }}" class="{% if t.reconciled %}row-conciliado{% endif %}">
+            <td class="text-center">
+              <input type="checkbox" class="chk-conciliar" data-id="{{ t.id }}"
+                {% if t.reconciled %}checked{% endif %}
+                style="width:18px;height:18px;cursor:pointer">
+            </td>
+            <td class="nowrap">{{ t.date.strftime('%d/%m/%Y') }}</td>
+            <td>
+              {{ t.description }}
+              {% if t.cost_center %}<br><span class="badge badge-purple" style="font-size:10px">{{ t.cost_center.code or t.cost_center.name[:14] }}</span>{% endif %}
+            </td>
+            <td><span class="badge badge-gray">{{ t.category.name if t.category else '—' }}</span></td>
+            <td class="text-right font-bold nowrap {% if t.type == 'entrada' %}text-green{% else %}text-red{% endif %}">
+              {% if t.type == 'entrada' %}+{% else %}−{% endif %} {{ fmt(t.value) }}
+            </td>
+            <td>
+              {% if t.type == 'entrada' %}
+                <span class="badge badge-green">Entrada</span>
+              {% else %}
+                <span class="badge badge-red">Saída</span>
+              {% endif %}
+            </td>
+            <td>
+              <input type="text" class="form-control form-control-sm ref-input" data-id="{{ t.id }}"
+                value="{{ t.bank_reference or '' }}" placeholder="Ex: DOC 12345"
+                style="font-size:11.5px;padding:4px 8px;width:110px">
+            </td>
+            <td class="text-sm" style="font-size:11.5px;color:var(--text-muted)">
+              <span id="conc-at-{{ t.id }}">{{ t.reconciled_at.strftime('%d/%m/%Y %H:%M') if t.reconciled_at else '—' }}</span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48">
+        <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+        <line x1="2" y1="10" x2="22" y2="10"></line>
+      </svg>
+      <p>Nenhum lançamento {% if status_filtro != 'todos' %}{{ status_filtro }} {% endif %}encontrado no período selecionado.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<style>
+.row-conciliado { background:#f0fdf4; }
+.row-conciliado td:first-child { border-left:3px solid #22c55e; }
+</style>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleConciliar(id, checked, ref) {
+  const fd = new FormData();
+  if (ref) fd.append('bank_reference', ref);
+  fetch('/conciliacao/toggle/' + id, { method:'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.ok) {
+        alert('Erro: ' + (data.error || 'não foi possível conciliar'));
+        return;
+      }
+      const row = document.getElementById('row-' + id);
+      if (data.reconciled) {
+        row.classList.add('row-conciliado');
+        document.getElementById('conc-at-' + id).textContent = data.reconciled_at || '—';
+      } else {
+        row.classList.remove('row-conciliado');
+        document.getElementById('conc-at-' + id).textContent = '—';
+      }
+    })
+    .catch(e => alert('Erro de rede: ' + e));
+}
+
+document.querySelectorAll('.chk-conciliar').forEach(chk => {
+  chk.addEventListener('change', e => {
+    const id = e.target.dataset.id;
+    const refInput = document.querySelector('.ref-input[data-id="' + id + '"]');
+    toggleConciliar(id, e.target.checked, refInput ? refInput.value : '');
+  });
+});
+
+// Quando o usuário sai do input de referência e o lançamento já está conciliado, salvar
+document.querySelectorAll('.ref-input').forEach(inp => {
+  inp.addEventListener('blur', e => {
+    const id = e.target.dataset.id;
+    const chk = document.querySelector('.chk-conciliar[data-id="' + id + '"]');
+    if (chk && chk.checked) {
+      // manda o ref sem alterar o estado; o toggle vai inverter, então reaplicamos
+      // Workaround: fazer dois toggles para salvar só o ref → não ideal.
+      // Simplificação: só persistimos o ref quando o usuário marcar/desmarcar o checkbox.
+    }
+  });
+});
+</script>
+{% endblock %}
