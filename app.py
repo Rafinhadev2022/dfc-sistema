@@ -1,13 +1,13 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder
+from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder, BankStatementEntry
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
 from sqlalchemy import func, extract
-import json, os, io, csv, mimetypes
+import json, os, io, csv, mimetypes, re
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
@@ -1574,6 +1574,309 @@ def conciliacao_marcar_todos():
     verbo = 'conciliados' if valor_reconciled else 'desmarcados'
     flash(f'{cnt} lançamento(s) {verbo} no período.', 'success')
     return redirect(url_for('conciliacao', mes=mes_str))
+
+# ─── IMPORTAÇÃO DE EXTRATO BANCÁRIO ──────────────────────────────────────────
+
+def _parse_ofx(content):
+    """Extrai transações de um arquivo OFX. Retorna lista de dicts."""
+    entries = []
+    # normaliza encoding (OFX pode vir em ISO-8859-1)
+    if isinstance(content, bytes):
+        for enc in ('utf-8', 'latin-1', 'cp1252'):
+            try:
+                content = content.decode(enc)
+                break
+            except Exception:
+                continue
+    # encontra blocos STMTTRN
+    for block in re.findall(r'<STMTTRN>(.*?)</STMTTRN>', content, re.DOTALL | re.IGNORECASE):
+        def get(tag):
+            m = re.search(r'<' + tag + r'>([^<\r\n]+)', block, re.IGNORECASE)
+            return m.group(1).strip() if m else ''
+        dt_raw = get('DTPOSTED')[:8]  # YYYYMMDD
+        amt_raw = get('TRNAMT')
+        memo = get('MEMO') or get('NAME') or ''
+        fitid = get('FITID')
+        if not dt_raw or not amt_raw:
+            continue
+        try:
+            d = date(int(dt_raw[0:4]), int(dt_raw[4:6]), int(dt_raw[6:8]))
+            amt = float(amt_raw.replace(',', '.'))
+        except Exception:
+            continue
+        entries.append({
+            'date': d,
+            'description': memo[:255],
+            'value': abs(amt),
+            'type': 'entrada' if amt > 0 else 'saida',
+            'fit_id': fitid[:120] if fitid else None,
+        })
+    return entries
+
+def _parse_csv(content):
+    """Extrai transações de CSV. Auto-detecta colunas comuns de bancos BR."""
+    entries = []
+    if isinstance(content, bytes):
+        for enc in ('utf-8-sig', 'utf-8', 'latin-1', 'cp1252'):
+            try:
+                content = content.decode(enc)
+                break
+            except Exception:
+                continue
+    # detecta separador
+    sample = content[:2000]
+    sep = ';' if sample.count(';') > sample.count(',') else ','
+    reader = csv.reader(io.StringIO(content), delimiter=sep)
+    rows = list(reader)
+    if not rows:
+        return entries
+    # encontra header (linha com palavras-chave)
+    header_idx = 0
+    for i, row in enumerate(rows[:10]):
+        joined = ' '.join(row).lower()
+        if any(k in joined for k in ('data', 'date', 'dt.')):
+            if any(k in joined for k in ('valor', 'value', 'amount', 'montante')):
+                header_idx = i
+                break
+    header = [c.strip().lower() for c in rows[header_idx]]
+    data_rows = rows[header_idx + 1:]
+
+    def find_col(*keywords):
+        for i, h in enumerate(header):
+            for k in keywords:
+                if k in h:
+                    return i
+        return -1
+
+    col_date = find_col('data', 'date', 'dt.')
+    col_val  = find_col('valor', 'value', 'amount', 'montante')
+    col_desc = find_col('descri', 'histor', 'memo', 'lançamento', 'lancamento')
+    col_type = find_col('tipo', 'entrada', 'd/c', 'cred')
+
+    if col_date < 0 or col_val < 0:
+        return entries
+
+    for row in data_rows:
+        if len(row) <= max(col_date, col_val):
+            continue
+        dstr = row[col_date].strip()
+        vstr = row[col_val].strip()
+        if not dstr or not vstr:
+            continue
+        # parse date (tenta vários formatos)
+        d = None
+        for fmt in ('%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%Y/%m/%d', '%d/%m/%y'):
+            try:
+                d = datetime.strptime(dstr, fmt).date()
+                break
+            except Exception:
+                continue
+        if not d:
+            continue
+        # parse value (BR: 1.234,56 ou US: 1234.56)
+        v = vstr.replace('R$', '').replace(' ', '')
+        if ',' in v and '.' in v:
+            v = v.replace('.', '').replace(',', '.')
+        elif ',' in v:
+            v = v.replace(',', '.')
+        try:
+            amt = float(v)
+        except Exception:
+            continue
+        desc = row[col_desc].strip() if col_desc >= 0 and len(row) > col_desc else ''
+        # determina tipo
+        tipo = None
+        if col_type >= 0 and len(row) > col_type:
+            tval = row[col_type].strip().lower()
+            if tval.startswith('c') or 'cred' in tval or 'entrada' in tval:
+                tipo = 'entrada'
+            elif tval.startswith('d') or 'deb' in tval or 'saida' in tval or 'saída' in tval:
+                tipo = 'saida'
+        if tipo is None:
+            tipo = 'entrada' if amt > 0 else 'saida'
+        entries.append({
+            'date': d,
+            'description': desc[:255],
+            'value': abs(amt),
+            'type': tipo,
+            'fit_id': None,
+        })
+    return entries
+
+def _auto_match_entries(entries):
+    """Tenta casar automaticamente cada entry com um Transaction. Retorna (novos, casados)."""
+    novos = 0
+    casados = 0
+    delta = timedelta(days=3)
+    for e in entries:
+        # dedup: se já existe entry com mesmo fit_id ou mesma data+valor+tipo, pula
+        exists = None
+        if e['fit_id']:
+            exists = BankStatementEntry.query.filter_by(fit_id=e['fit_id']).first()
+        if not exists:
+            exists = BankStatementEntry.query.filter_by(
+                date=e['date'], value=e['value'], type=e['type']
+            ).filter(BankStatementEntry.description == e['description']).first()
+        if exists:
+            continue
+        entry = BankStatementEntry(
+            date=e['date'], description=e['description'], value=e['value'],
+            type=e['type'], fit_id=e['fit_id'], user_id=current_user.id
+        )
+        db.session.add(entry)
+        db.session.flush()
+        novos += 1
+
+        # busca candidatos: mesmo tipo, valor ±0.01, data ±3 dias, não conciliado, sem entry associada
+        candidates = Transaction.query.filter(
+            Transaction.type == e['type'],
+            Transaction.value >= e['value'] - 0.01,
+            Transaction.value <= e['value'] + 0.01,
+            Transaction.date >= e['date'] - delta,
+            Transaction.date <= e['date'] + delta,
+            Transaction.status == 'realizado',
+            (Transaction.reconciled == False) | (Transaction.reconciled.is_(None))
+        ).all()
+        # descarta quem já tem entry vinculada
+        candidates = [c for c in candidates
+                      if not BankStatementEntry.query.filter_by(matched_transaction_id=c.id).first()]
+        # ordena por proximidade da data
+        candidates.sort(key=lambda t: abs((t.date - e['date']).days))
+        if candidates:
+            c = candidates[0]
+            entry.matched_transaction_id = c.id
+            entry.matched_at = datetime.utcnow()
+            c.reconciled = True
+            c.reconciled_at = datetime.utcnow()
+            c.bank_reference = (e['fit_id'] or e['description'] or '')[:120]
+            casados += 1
+    db.session.commit()
+    return novos, casados
+
+@app.route('/conciliacao/importar', methods=['POST'])
+@login_required
+def conciliacao_importar():
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('conciliacao'))
+    arquivo = request.files.get('extrato')
+    if not arquivo or not arquivo.filename:
+        flash('Selecione um arquivo OFX ou CSV.', 'warning')
+        return redirect(url_for('conciliacao'))
+    nome = arquivo.filename.lower()
+    content = arquivo.read()
+    try:
+        if nome.endswith('.ofx') or b'<OFX' in content[:2000] or b'<STMTTRN' in content[:5000]:
+            entries = _parse_ofx(content)
+            fmt = 'OFX'
+        elif nome.endswith('.csv') or nome.endswith('.txt'):
+            entries = _parse_csv(content)
+            fmt = 'CSV'
+        else:
+            flash('Formato não suportado. Envie um arquivo .ofx ou .csv.', 'danger')
+            return redirect(url_for('conciliacao'))
+    except Exception as exc:
+        flash(f'Erro ao processar arquivo: {exc}', 'danger')
+        return redirect(url_for('conciliacao'))
+    if not entries:
+        flash(f'Nenhuma transação encontrada no arquivo {fmt}.', 'warning')
+        return redirect(url_for('conciliacao'))
+    novos, casados = _auto_match_entries(entries)
+    duplicados = len(entries) - novos
+    msg = f'Extrato {fmt} importado: {len(entries)} linha(s) lida(s), {novos} nova(s), '
+    msg += f'{casados} conciliada(s) automaticamente'
+    if duplicados:
+        msg += f', {duplicados} ignorada(s) (já importadas)'
+    flash(msg + '.', 'success')
+    return redirect(url_for('conciliacao_extrato'))
+
+@app.route('/conciliacao/extrato')
+@login_required
+def conciliacao_extrato():
+    status = request.args.get('status', 'todos')  # todos / sem_match / casado
+    q = BankStatementEntry.query
+    if status == 'sem_match':
+        q = q.filter(BankStatementEntry.matched_transaction_id.is_(None))
+    elif status == 'casado':
+        q = q.filter(BankStatementEntry.matched_transaction_id.isnot(None))
+    entries = q.order_by(BankStatementEntry.date.desc(), BankStatementEntry.id.desc()).all()
+    # candidatos para cada entry sem match
+    candidatos = {}
+    delta = timedelta(days=7)
+    for e in entries:
+        if e.matched_transaction_id:
+            continue
+        cs = Transaction.query.filter(
+            Transaction.type == e.type,
+            Transaction.value >= e.value - 0.01,
+            Transaction.value <= e.value + 0.01,
+            Transaction.date >= e.date - delta,
+            Transaction.date <= e.date + delta,
+            Transaction.status == 'realizado',
+        ).all()
+        cs = [c for c in cs if not BankStatementEntry.query.filter(
+            BankStatementEntry.matched_transaction_id == c.id,
+            BankStatementEntry.id != e.id
+        ).first()]
+        cs.sort(key=lambda t: abs((t.date - e.date).days))
+        candidatos[e.id] = cs[:5]
+    total = len(entries)
+    casados = sum(1 for e in entries if e.matched_transaction_id)
+    return render_template('conciliacao/extrato.html',
+        entries=entries, status=status, candidatos=candidatos,
+        total=total, casados=casados, pendentes=total - casados)
+
+@app.route('/conciliacao/extrato/<int:entry_id>/match/<int:tx_id>', methods=['POST'])
+@login_required
+def conciliacao_match_manual(entry_id, tx_id):
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger'); return redirect(url_for('conciliacao_extrato'))
+    e = BankStatementEntry.query.get_or_404(entry_id)
+    t = Transaction.query.get_or_404(tx_id)
+    # remove match anterior (se houver)
+    if e.matched_transaction_id:
+        old = Transaction.query.get(e.matched_transaction_id)
+        if old:
+            old.reconciled = False; old.reconciled_at = None
+    e.matched_transaction_id = t.id
+    e.matched_at = datetime.utcnow()
+    t.reconciled = True
+    t.reconciled_at = datetime.utcnow()
+    t.bank_reference = (e.fit_id or e.description or '')[:120]
+    db.session.commit()
+    flash('Conciliação manual registrada.', 'success')
+    return redirect(url_for('conciliacao_extrato'))
+
+@app.route('/conciliacao/extrato/<int:entry_id>/unmatch', methods=['POST'])
+@login_required
+def conciliacao_unmatch(entry_id):
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger'); return redirect(url_for('conciliacao_extrato'))
+    e = BankStatementEntry.query.get_or_404(entry_id)
+    if e.matched_transaction_id:
+        t = Transaction.query.get(e.matched_transaction_id)
+        if t:
+            t.reconciled = False; t.reconciled_at = None
+    e.matched_transaction_id = None
+    e.matched_at = None
+    db.session.commit()
+    flash('Vínculo removido.', 'success')
+    return redirect(url_for('conciliacao_extrato'))
+
+@app.route('/conciliacao/extrato/<int:entry_id>/excluir', methods=['POST'])
+@login_required
+def conciliacao_entry_excluir(entry_id):
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger'); return redirect(url_for('conciliacao_extrato'))
+    e = BankStatementEntry.query.get_or_404(entry_id)
+    if e.matched_transaction_id:
+        t = Transaction.query.get(e.matched_transaction_id)
+        if t:
+            t.reconciled = False; t.reconciled_at = None
+    db.session.delete(e)
+    db.session.commit()
+    flash('Linha do extrato removida.', 'success')
+    return redirect(url_for('conciliacao_extrato'))
 
 # ─── USUÁRIOS ────────────────────────────────────────────────────────────────
 

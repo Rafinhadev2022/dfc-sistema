@@ -6,6 +6,26 @@
 
 {% block content %}
 
+<!-- Importação de extrato -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Importar extrato do banco</h2>
+    <a href="{{ url_for('conciliacao_extrato') }}" class="btn btn-outline btn-sm">Ver extrato importado →</a>
+  </div>
+  <div class="panel-body">
+    <form method="POST" action="{{ url_for('conciliacao_importar') }}" enctype="multipart/form-data" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="margin:0;flex:1;min-width:260px">
+        <label>Arquivo do extrato <span style="font-weight:400;color:var(--text-muted);font-size:11px">(OFX ou CSV — baixe no app do seu banco)</span></label>
+        <input type="file" name="extrato" class="form-control" accept=".ofx,.csv,.txt" required>
+      </div>
+      <button class="btn btn-primary">↑ Importar e conciliar</button>
+    </form>
+    <p style="font-size:11.5px;color:var(--text-muted);margin-top:10px;line-height:1.5">
+      O sistema lê o arquivo, cria o extrato no banco de dados e tenta casar cada linha com um lançamento já registrado (mesmo valor e data até ±3 dias). Os conciliados ficam verdes abaixo; os que não casaram ficam na aba <strong>Ver extrato importado</strong> para você ajustar manualmente.
+    </p>
+  </div>
+</div>
+
 <!-- Filtros -->
 <div class="panel">
   <div class="panel-header">

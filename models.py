@@ -108,6 +108,21 @@ class BillReminder(db.Model):
     category = db.relationship('Category', backref='bill_reminders', lazy=True)
     user = db.relationship('User', backref='bill_reminders', lazy=True)
 
+class BankStatementEntry(db.Model):
+    __tablename__ = 'bank_statement_entries'
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False)
+    description = db.Column(db.String(255))
+    value = db.Column(db.Float, nullable=False)  # sempre positivo
+    type = db.Column(db.String(10), nullable=False)  # entrada / saida
+    fit_id = db.Column(db.String(120))  # ID único do banco (OFX FITID)
+    matched_transaction_id = db.Column(db.Integer, db.ForeignKey('transactions.id'), nullable=True)
+    matched_at = db.Column(db.DateTime)
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    matched_transaction = db.relationship('Transaction', foreign_keys=[matched_transaction_id],
+                                          backref=db.backref('bank_entry', uselist=False))
+
 class Projection(db.Model):
     __tablename__ = 'projections'
     id = db.Column(db.Integer, primary_key=True)
