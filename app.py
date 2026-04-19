@@ -893,10 +893,21 @@ def relatorio_pdf():
 
     def fmt_var(atual, anterior):
         if not anterior:
-            return '—' if not atual else 'novo'
+            return '-' if not atual else 'novo'
         var = (atual - anterior) / abs(anterior) * 100
         sinal = '+' if var >= 0 else ''
         return f'{sinal}{var:.1f}%'
+
+    def clean_txt(s):
+        """Sanitiza caracteres Unicode que a fonte Helvetica latin-1 não aceita."""
+        if s is None:
+            return '-'
+        return (str(s)
+                .replace('\u2014', '-').replace('\u2013', '-')   # em/en dash
+                .replace('\u2018', "'").replace('\u2019', "'")   # curly single quotes
+                .replace('\u201c', '"').replace('\u201d', '"')   # curly double quotes
+                .replace('\u2022', '*').replace('\u2026', '...') # bullet, ellipsis
+                .replace('\u00a0', ' '))                          # NBSP
 
     LOGO_PATH = os.path.join(app.root_path, 'static', 'img', 'logo-ns.png')
     periodo_label = f'{inicio.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}'
@@ -946,7 +957,7 @@ def relatorio_pdf():
             self.set_y(-12)
             self.set_font('Helvetica', 'I', 8)
             self.set_text_color(120, 120, 120)
-            self.cell(95, 5, 'Nunes & Santos LTDA — Sistema DFC', align='L')
+            self.cell(95, 5, 'Nunes & Santos LTDA - Sistema DFC', align='L')
             self.cell(95, 5, f'Pagina {self.page_no()}/{{nb}}', align='R')
 
         def section_title(self, titulo):
@@ -1025,7 +1036,7 @@ def relatorio_pdf():
         pdf.set_font('Helvetica', '', 10)
         for cat, total in cat_entradas:
             pct = (float(total) / entradas_total * 100) if entradas_total else 0
-            pdf.cell(110, 6, str(cat)[:55], border=1)
+            pdf.cell(110, 6, clean_txt(cat)[:55], border=1)
             pdf.cell(50, 6,  fmt_valor(total), border=1, align='R')
             pdf.cell(30, 6,  f'{pct:.1f}%', border=1, align='C', ln=True)
         pdf.set_font('Helvetica', 'B', 10)
@@ -1071,8 +1082,8 @@ def relatorio_pdf():
         pdf.set_font('Helvetica', '', 9)
         for numero, cliente, ent, sai in por_obra:
             saldo_o = float(ent or 0) - float(sai or 0)
-            pdf.cell(30, 6, str(numero)[:16], border=1)
-            pdf.cell(70, 6, str(cliente)[:38], border=1)
+            pdf.cell(30, 6, clean_txt(numero)[:16], border=1)
+            pdf.cell(70, 6, clean_txt(cliente)[:38], border=1)
             pdf.cell(30, 6, fmt_valor(ent or 0), border=1, align='R')
             pdf.cell(30, 6, fmt_valor(sai or 0), border=1, align='R')
             if saldo_o >= 0:
@@ -1098,8 +1109,8 @@ def relatorio_pdf():
         pdf.set_font('Helvetica', '', 9)
         for code, nome, ent, sai in por_cc:
             saldo_cc = float(ent or 0) - float(sai or 0)
-            pdf.cell(25, 6, str(code or '-')[:12], border=1)
-            pdf.cell(75, 6, str(nome)[:40], border=1)
+            pdf.cell(25, 6, clean_txt(code or '-')[:12], border=1)
+            pdf.cell(75, 6, clean_txt(nome)[:40], border=1)
             pdf.cell(30, 6, fmt_valor(ent or 0), border=1, align='R')
             pdf.cell(30, 6, fmt_valor(sai or 0), border=1, align='R')
             if saldo_cc >= 0:
@@ -1125,7 +1136,7 @@ def relatorio_pdf():
         for i, (nome, total) in enumerate(top_fornecedores, 1):
             pct = (float(total) / saidas_total * 100) if saidas_total else 0
             pdf.cell(10, 6,  str(i),             border=1, align='C')
-            pdf.cell(130, 6, str(nome)[:70],     border=1)
+            pdf.cell(130, 6, clean_txt(nome)[:70],     border=1)
             pdf.cell(30, 6,  fmt_valor(total),   border=1, align='R')
             pdf.cell(20, 6,  f'{pct:.1f}%',      border=1, align='C', ln=True)
         pdf.ln(3)
@@ -1146,8 +1157,8 @@ def relatorio_pdf():
         for i, (nome, cargo, total) in enumerate(top_funcionarios, 1):
             pct = (float(total) / saidas_total * 100) if saidas_total else 0
             pdf.cell(10, 6, str(i),           border=1, align='C')
-            pdf.cell(90, 6, str(nome)[:48],   border=1)
-            pdf.cell(40, 6, str(cargo or '-')[:22], border=1)
+            pdf.cell(90, 6, clean_txt(nome)[:48],   border=1)
+            pdf.cell(40, 6, clean_txt(cargo or '-')[:22], border=1)
             pdf.cell(30, 6, fmt_valor(total), border=1, align='R')
             pdf.cell(20, 6, f'{pct:.1f}%',    border=1, align='C', ln=True)
         pdf.ln(3)
@@ -1174,9 +1185,9 @@ def relatorio_pdf():
             else:
                 fill = False
             tipo_txt = 'Entrada' if l.type == 'entrada' else 'Saida'
-            desc = l.description[:38] if len(l.description) > 38 else l.description
-            cat_nome = (l.category.name[:18] if l.category else '-')
-            obra = (l.contract.number[:14] if l.contract else '-')
+            desc = clean_txt(l.description)[:38]
+            cat_nome = clean_txt(l.category.name)[:18] if l.category else '-'
+            obra = clean_txt(l.contract.number)[:14] if l.contract else '-'
             pdf.cell(20, 6, l.date.strftime('%d/%m/%Y'), border=1, align='C', fill=fill)
             pdf.cell(65, 6, desc,     border=1, fill=fill)
             pdf.cell(32, 6, cat_nome, border=1, fill=fill)
