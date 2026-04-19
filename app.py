@@ -6,7 +6,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from dateutil.relativedelta import relativedelta
 from fpdf import FPDF
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, case
 import json, os, io, csv, mimetypes, re
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -813,114 +813,384 @@ def relatorio_pdf():
         Transaction.status == 'realizado'
     ).group_by(Category.id).order_by(func.sum(Transaction.value).desc()).all()
 
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    # ── DADOS ADICIONAIS PARA O RELATÓRIO ──────────────────────────────────
+    # Saldo anterior (acumulado até o dia anterior ao início do período)
+    entradas_ant = db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'entrada', Transaction.date < inicio,
+        Transaction.status == 'realizado'
+    ).scalar() or 0
+    saidas_ant = db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'saida', Transaction.date < inicio,
+        Transaction.status == 'realizado'
+    ).scalar() or 0
+    saldo_anterior = float(entradas_ant) - float(saidas_ant)
+    saldo = float(entradas_total) - float(saidas_total)
+    saldo_final = saldo_anterior + saldo
 
-    # Cabeçalho
-    pdf.set_fill_color(30, 64, 175)
-    pdf.rect(0, 0, 210, 35, 'F')
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Helvetica', 'B', 18)
-    pdf.set_xy(10, 8)
-    pdf.cell(190, 10, 'DEMONSTRACAO DE FLUXO DE CAIXA', align='C')
-    pdf.set_font('Helvetica', '', 11)
-    pdf.set_xy(10, 20)
-    pdf.cell(190, 8, f'Periodo: {inicio.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}', align='C')
-    pdf.set_xy(10, 27)
-    pdf.cell(190, 6, f'Emitido em: {datetime.now().strftime("%d/%m/%Y as %H:%M")}', align='C')
+    # Mês anterior para comparativo
+    mes_ant_dt = inicio - relativedelta(months=1)
+    ini_ma = date(mes_ant_dt.year, mes_ant_dt.month, 1)
+    fim_ma = (ini_ma + relativedelta(months=1)) - timedelta(days=1)
+    ent_ma = float(db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'entrada', Transaction.date >= ini_ma,
+        Transaction.date <= fim_ma, Transaction.status == 'realizado'
+    ).scalar() or 0)
+    sai_ma = float(db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'saida', Transaction.date >= ini_ma,
+        Transaction.date <= fim_ma, Transaction.status == 'realizado'
+    ).scalar() or 0)
+    saldo_ma = ent_ma - sai_ma
 
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_y(42)
+    # Previstos (lançamentos com status = 'previsto' no período)
+    prev_entradas = float(db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'entrada', Transaction.date >= inicio,
+        Transaction.date <= fim, Transaction.status == 'previsto'
+    ).scalar() or 0)
+    prev_saidas = float(db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'saida', Transaction.date >= inicio,
+        Transaction.date <= fim, Transaction.status == 'previsto'
+    ).scalar() or 0)
 
-    # Resumo
-    pdf.set_font('Helvetica', 'B', 13)
-    pdf.set_fill_color(243, 244, 246)
-    pdf.cell(190, 8, 'RESUMO DO PERIODO', fill=True, ln=True)
-    pdf.ln(2)
+    # Por obra / contrato
+    por_obra = db.session.query(
+        Contract.number, Contract.client,
+        func.sum(case((Transaction.type == 'entrada', Transaction.value), else_=0)).label('ent'),
+        func.sum(case((Transaction.type == 'saida',   Transaction.value), else_=0)).label('sai'),
+    ).join(Transaction, Transaction.contract_id == Contract.id).filter(
+        Transaction.date >= inicio, Transaction.date <= fim,
+        Transaction.status == 'realizado'
+    ).group_by(Contract.id).order_by(func.sum(Transaction.value).desc()).all()
 
+    # Por centro de custo
+    por_cc = db.session.query(
+        CostCenter.code, CostCenter.name,
+        func.sum(case((Transaction.type == 'entrada', Transaction.value), else_=0)).label('ent'),
+        func.sum(case((Transaction.type == 'saida',   Transaction.value), else_=0)).label('sai'),
+    ).join(Transaction, Transaction.cost_center_id == CostCenter.id).filter(
+        Transaction.date >= inicio, Transaction.date <= fim,
+        Transaction.status == 'realizado'
+    ).group_by(CostCenter.id).order_by(func.sum(Transaction.value).desc()).all()
+
+    # Top 5 fornecedores (pagamentos)
+    top_fornecedores = db.session.query(
+        Supplier.name, func.sum(Transaction.value).label('total')
+    ).join(Transaction, Transaction.supplier_id == Supplier.id).filter(
+        Transaction.type == 'saida', Transaction.date >= inicio,
+        Transaction.date <= fim, Transaction.status == 'realizado'
+    ).group_by(Supplier.id).order_by(func.sum(Transaction.value).desc()).limit(5).all()
+
+    # Top 5 funcionários (adiantamentos/pagamentos)
+    top_funcionarios = db.session.query(
+        Employee.name, Employee.role, func.sum(Transaction.value).label('total')
+    ).join(Transaction, Transaction.employee_id == Employee.id).filter(
+        Transaction.type == 'saida', Transaction.date >= inicio,
+        Transaction.date <= fim, Transaction.status == 'realizado'
+    ).group_by(Employee.id).order_by(func.sum(Transaction.value).desc()).limit(5).all()
+
+    # ── CLASSE PDF COM CABEÇALHO E RODAPÉ ──────────────────────────────────
     def fmt_valor(v):
         return f'R$ {v:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
 
-    pdf.set_font('Helvetica', '', 11)
-    pdf.set_fill_color(220, 252, 231)
-    pdf.cell(95, 8, 'Total de Entradas', fill=True, border=1)
-    pdf.set_fill_color(220, 252, 231)
-    pdf.cell(95, 8, fmt_valor(entradas_total), fill=True, border=1, align='R', ln=True)
+    def fmt_var(atual, anterior):
+        if not anterior:
+            return '—' if not atual else 'novo'
+        var = (atual - anterior) / abs(anterior) * 100
+        sinal = '+' if var >= 0 else ''
+        return f'{sinal}{var:.1f}%'
 
-    pdf.set_fill_color(254, 226, 226)
-    pdf.cell(95, 8, 'Total de Saidas', fill=True, border=1)
-    pdf.cell(95, 8, fmt_valor(saidas_total), fill=True, border=1, align='R', ln=True)
+    LOGO_PATH = os.path.join(app.root_path, 'static', 'img', 'logo-ns.png')
+    periodo_label = f'{inicio.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}'
+    emissao_label = datetime.now().strftime('%d/%m/%Y às %H:%M').replace('às', 'as')
 
-    saldo = entradas_total - saidas_total
-    fill_cor = (220, 252, 231) if saldo >= 0 else (254, 226, 226)
-    pdf.set_fill_color(*fill_cor)
-    pdf.set_font('Helvetica', 'B', 11)
-    pdf.cell(95, 9, 'SALDO DO PERIODO', fill=True, border=1)
-    pdf.cell(95, 9, fmt_valor(saldo), fill=True, border=1, align='R', ln=True)
-    pdf.ln(4)
+    class DFCPdf(FPDF):
+        def header(self):
+            # Faixa azul
+            self.set_fill_color(30, 64, 175)
+            self.rect(0, 0, 210, 28, 'F')
+            # Logo (se existir)
+            if os.path.exists(LOGO_PATH):
+                try:
+                    self.image(LOGO_PATH, x=10, y=5, h=18)
+                except Exception:
+                    pass
+            # Textos de cabeçalho
+            self.set_text_color(255, 255, 255)
+            self.set_font('Helvetica', 'B', 14)
+            self.set_xy(32, 6)
+            self.cell(170, 7, 'NUNES & SANTOS LTDA', align='L')
+            self.set_font('Helvetica', '', 9)
+            self.set_xy(32, 13)
+            self.cell(170, 5, 'CNPJ: 22.892.910/0001-69', align='L')
+            self.set_font('Helvetica', 'B', 11)
+            self.set_xy(32, 18)
+            self.cell(170, 5, 'DEMONSTRACAO DE FLUXO DE CAIXA', align='L')
+            # Período na direita
+            self.set_font('Helvetica', '', 9)
+            self.set_xy(10, 6)
+            self.cell(195, 5, f'Periodo: {periodo_label}', align='R')
+            self.set_xy(10, 12)
+            self.cell(195, 5, f'Emitido: {emissao_label}', align='R')
+            self.set_text_color(0, 0, 0)
+            self.set_y(34)
 
-    # Por categoria - Entradas
+        def footer(self):
+            self.set_y(-12)
+            self.set_font('Helvetica', 'I', 8)
+            self.set_text_color(120, 120, 120)
+            self.cell(95, 5, 'Nunes & Santos LTDA — Sistema DFC', align='L')
+            self.cell(95, 5, f'Pagina {self.page_no()}/{{nb}}', align='R')
+
+        def section_title(self, titulo):
+            self.set_font('Helvetica', 'B', 12)
+            self.set_fill_color(30, 64, 175)
+            self.set_text_color(255, 255, 255)
+            self.cell(190, 7, f'  {titulo}', fill=True, ln=True)
+            self.set_text_color(0, 0, 0)
+            self.ln(1)
+
+        def kv_row(self, label, valor, cor=(243, 244, 246), bold_label=False, bold_valor=False):
+            self.set_fill_color(*cor)
+            self.set_font('Helvetica', 'B' if bold_label else '', 10)
+            self.cell(95, 7, label, fill=True, border=1)
+            self.set_font('Helvetica', 'B' if bold_valor else '', 10)
+            self.cell(95, 7, valor, fill=True, border=1, align='R', ln=True)
+
+    pdf = DFCPdf()
+    pdf.alias_nb_pages()
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
+    # ── 1. RESUMO EXECUTIVO ────────────────────────────────────────────────
+    pdf.section_title('RESUMO EXECUTIVO')
+    pdf.kv_row('Saldo anterior (acumulado)', fmt_valor(saldo_anterior), (243, 244, 246), True)
+    pdf.kv_row('(+) Total de Entradas', fmt_valor(entradas_total), (220, 252, 231))
+    pdf.kv_row('(-) Total de Saidas',   fmt_valor(saidas_total),   (254, 226, 226))
+    fill_saldo = (220, 252, 231) if saldo >= 0 else (254, 226, 226)
+    pdf.kv_row('= Saldo do Periodo', fmt_valor(saldo), fill_saldo, True, True)
+    fill_final = (219, 234, 254) if saldo_final >= 0 else (254, 226, 226)
+    pdf.kv_row('SALDO ACUMULADO FINAL', fmt_valor(saldo_final), fill_final, True, True)
+    pdf.ln(3)
+
+    # ── 2. COMPARATIVO COM MÊS ANTERIOR ───────────────────────────────────
+    pdf.section_title('COMPARATIVO COM MES ANTERIOR')
+    mes_ant_label = ini_ma.strftime('%m/%Y')
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_fill_color(224, 231, 255)
+    pdf.cell(60, 7, 'Indicador', fill=True, border=1)
+    pdf.cell(45, 7, f'Mes Anterior ({mes_ant_label})', fill=True, border=1, align='R')
+    pdf.cell(45, 7, 'Periodo Atual', fill=True, border=1, align='R')
+    pdf.cell(40, 7, 'Variacao', fill=True, border=1, align='C', ln=True)
+    pdf.set_font('Helvetica', '', 9)
+    for label, v_ma, v_at in [
+        ('Entradas', ent_ma, entradas_total),
+        ('Saidas',   sai_ma, saidas_total),
+        ('Saldo',    saldo_ma, saldo),
+    ]:
+        pdf.cell(60, 6, label, border=1)
+        pdf.cell(45, 6, fmt_valor(v_ma), border=1, align='R')
+        pdf.cell(45, 6, fmt_valor(v_at), border=1, align='R')
+        var_txt = fmt_var(v_at, v_ma)
+        if var_txt.startswith('+'):
+            pdf.set_text_color(22, 101, 52) if label == 'Entradas' else pdf.set_text_color(153, 27, 27)
+        elif var_txt.startswith('-'):
+            pdf.set_text_color(153, 27, 27) if label == 'Entradas' else pdf.set_text_color(22, 101, 52)
+        pdf.cell(40, 6, var_txt, border=1, align='C', ln=True)
+        pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
+
+    # ── 3. PREVISTOS (A REALIZAR) NO PERÍODO ──────────────────────────────
+    if prev_entradas or prev_saidas:
+        pdf.section_title('LANCAMENTOS PREVISTOS NO PERIODO (a realizar)')
+        pdf.kv_row('Entradas previstas (a receber)', fmt_valor(prev_entradas), (254, 243, 199))
+        pdf.kv_row('Saidas previstas (a pagar)',     fmt_valor(prev_saidas),   (254, 243, 199))
+        pdf.ln(3)
+
+    # ── 4. ENTRADAS POR CATEGORIA (com %) ─────────────────────────────────
     if cat_entradas:
-        pdf.set_font('Helvetica', 'B', 12)
-        pdf.set_fill_color(243, 244, 246)
-        pdf.cell(190, 8, 'ENTRADAS POR CATEGORIA', fill=True, ln=True)
-        pdf.ln(1)
+        pdf.section_title('ENTRADAS POR CATEGORIA')
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_fill_color(209, 250, 229)
-        pdf.cell(130, 7, 'Categoria', fill=True, border=1)
-        pdf.cell(60, 7, 'Valor', fill=True, border=1, align='R', ln=True)
+        pdf.cell(110, 7, 'Categoria', fill=True, border=1)
+        pdf.cell(50, 7,  'Valor',     fill=True, border=1, align='R')
+        pdf.cell(30, 7,  '% do Total', fill=True, border=1, align='C', ln=True)
         pdf.set_font('Helvetica', '', 10)
         for cat, total in cat_entradas:
-            pdf.cell(130, 7, str(cat), border=1)
-            pdf.cell(60, 7, fmt_valor(total), border=1, align='R', ln=True)
-        pdf.ln(4)
+            pct = (float(total) / entradas_total * 100) if entradas_total else 0
+            pdf.cell(110, 6, str(cat)[:55], border=1)
+            pdf.cell(50, 6,  fmt_valor(total), border=1, align='R')
+            pdf.cell(30, 6,  f'{pct:.1f}%', border=1, align='C', ln=True)
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_fill_color(220, 252, 231)
+        pdf.cell(110, 7, 'TOTAL', fill=True, border=1)
+        pdf.cell(50, 7,  fmt_valor(entradas_total), fill=True, border=1, align='R')
+        pdf.cell(30, 7,  '100.0%', fill=True, border=1, align='C', ln=True)
+        pdf.ln(3)
 
-    # Por categoria - Saídas
+    # ── 5. SAÍDAS POR CATEGORIA (com %) ───────────────────────────────────
     if cat_saidas:
-        pdf.set_font('Helvetica', 'B', 12)
-        pdf.set_fill_color(243, 244, 246)
-        pdf.cell(190, 8, 'SAIDAS POR CATEGORIA', fill=True, ln=True)
-        pdf.ln(1)
+        pdf.section_title('SAIDAS POR CATEGORIA')
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_fill_color(254, 205, 211)
-        pdf.cell(130, 7, 'Categoria', fill=True, border=1)
-        pdf.cell(60, 7, 'Valor', fill=True, border=1, align='R', ln=True)
+        pdf.cell(110, 7, 'Categoria', fill=True, border=1)
+        pdf.cell(50, 7,  'Valor',     fill=True, border=1, align='R')
+        pdf.cell(30, 7,  '% do Total', fill=True, border=1, align='C', ln=True)
         pdf.set_font('Helvetica', '', 10)
         for cat, total in cat_saidas:
-            pdf.cell(130, 7, str(cat), border=1)
-            pdf.cell(60, 7, fmt_valor(total), border=1, align='R', ln=True)
-        pdf.ln(4)
+            pct = (float(total) / saidas_total * 100) if saidas_total else 0
+            pdf.cell(110, 6, str(cat)[:55], border=1)
+            pdf.cell(50, 6,  fmt_valor(total), border=1, align='R')
+            pdf.cell(30, 6,  f'{pct:.1f}%', border=1, align='C', ln=True)
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_fill_color(254, 226, 226)
+        pdf.cell(110, 7, 'TOTAL', fill=True, border=1)
+        pdf.cell(50, 7,  fmt_valor(saidas_total), fill=True, border=1, align='R')
+        pdf.cell(30, 7,  '100.0%', fill=True, border=1, align='C', ln=True)
+        pdf.ln(3)
 
-    # Lançamentos detalhados
-    if lancamentos:
-        pdf.add_page()
-        pdf.set_font('Helvetica', 'B', 12)
-        pdf.set_fill_color(243, 244, 246)
-        pdf.cell(190, 8, 'LANCAMENTOS DETALHADOS', fill=True, ln=True)
-        pdf.ln(1)
+    # ── 6. ANÁLISE POR OBRA / CONTRATO ────────────────────────────────────
+    if por_obra:
+        if pdf.get_y() > 220:
+            pdf.add_page()
+        pdf.section_title('ANALISE POR OBRA / CONTRATO')
         pdf.set_font('Helvetica', 'B', 9)
         pdf.set_fill_color(224, 231, 255)
-        pdf.cell(22, 7, 'Data', fill=True, border=1)
-        pdf.cell(75, 7, 'Descricao', fill=True, border=1)
-        pdf.cell(40, 7, 'Categoria', fill=True, border=1)
-        pdf.cell(18, 7, 'Tipo', fill=True, border=1, align='C')
-        pdf.cell(35, 7, 'Valor', fill=True, border=1, align='R', ln=True)
+        pdf.cell(30, 7, 'Contrato', fill=True, border=1)
+        pdf.cell(70, 7, 'Cliente',  fill=True, border=1)
+        pdf.cell(30, 7, 'Entradas', fill=True, border=1, align='R')
+        pdf.cell(30, 7, 'Saidas',   fill=True, border=1, align='R')
+        pdf.cell(30, 7, 'Saldo',    fill=True, border=1, align='R', ln=True)
         pdf.set_font('Helvetica', '', 9)
-        for l in lancamentos:
+        for numero, cliente, ent, sai in por_obra:
+            saldo_o = float(ent or 0) - float(sai or 0)
+            pdf.cell(30, 6, str(numero)[:16], border=1)
+            pdf.cell(70, 6, str(cliente)[:38], border=1)
+            pdf.cell(30, 6, fmt_valor(ent or 0), border=1, align='R')
+            pdf.cell(30, 6, fmt_valor(sai or 0), border=1, align='R')
+            if saldo_o >= 0:
+                pdf.set_text_color(22, 101, 52)
+            else:
+                pdf.set_text_color(153, 27, 27)
+            pdf.cell(30, 6, fmt_valor(saldo_o), border=1, align='R', ln=True)
+            pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+
+    # ── 7. ANÁLISE POR CENTRO DE CUSTO ────────────────────────────────────
+    if por_cc:
+        if pdf.get_y() > 220:
+            pdf.add_page()
+        pdf.section_title('ANALISE POR CENTRO DE CUSTO')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_fill_color(224, 231, 255)
+        pdf.cell(25, 7, 'Codigo',  fill=True, border=1)
+        pdf.cell(75, 7, 'Nome',    fill=True, border=1)
+        pdf.cell(30, 7, 'Entradas',fill=True, border=1, align='R')
+        pdf.cell(30, 7, 'Saidas',  fill=True, border=1, align='R')
+        pdf.cell(30, 7, 'Saldo',   fill=True, border=1, align='R', ln=True)
+        pdf.set_font('Helvetica', '', 9)
+        for code, nome, ent, sai in por_cc:
+            saldo_cc = float(ent or 0) - float(sai or 0)
+            pdf.cell(25, 6, str(code or '-')[:12], border=1)
+            pdf.cell(75, 6, str(nome)[:40], border=1)
+            pdf.cell(30, 6, fmt_valor(ent or 0), border=1, align='R')
+            pdf.cell(30, 6, fmt_valor(sai or 0), border=1, align='R')
+            if saldo_cc >= 0:
+                pdf.set_text_color(22, 101, 52)
+            else:
+                pdf.set_text_color(153, 27, 27)
+            pdf.cell(30, 6, fmt_valor(saldo_cc), border=1, align='R', ln=True)
+            pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
+
+    # ── 8. TOP 5 FORNECEDORES ─────────────────────────────────────────────
+    if top_fornecedores:
+        if pdf.get_y() > 235:
+            pdf.add_page()
+        pdf.section_title('TOP 5 FORNECEDORES (por valor pago)')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_fill_color(254, 205, 211)
+        pdf.cell(10, 7,  '#',          fill=True, border=1, align='C')
+        pdf.cell(130, 7, 'Fornecedor', fill=True, border=1)
+        pdf.cell(30, 7,  'Valor Pago', fill=True, border=1, align='R')
+        pdf.cell(20, 7,  '% Saidas',   fill=True, border=1, align='C', ln=True)
+        pdf.set_font('Helvetica', '', 9)
+        for i, (nome, total) in enumerate(top_fornecedores, 1):
+            pct = (float(total) / saidas_total * 100) if saidas_total else 0
+            pdf.cell(10, 6,  str(i),             border=1, align='C')
+            pdf.cell(130, 6, str(nome)[:70],     border=1)
+            pdf.cell(30, 6,  fmt_valor(total),   border=1, align='R')
+            pdf.cell(20, 6,  f'{pct:.1f}%',      border=1, align='C', ln=True)
+        pdf.ln(3)
+
+    # ── 9. TOP 5 FUNCIONÁRIOS ─────────────────────────────────────────────
+    if top_funcionarios:
+        if pdf.get_y() > 235:
+            pdf.add_page()
+        pdf.section_title('TOP 5 FUNCIONARIOS (adiantamentos/pagamentos)')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_fill_color(224, 231, 255)
+        pdf.cell(10, 7,  '#',           fill=True, border=1, align='C')
+        pdf.cell(90, 7,  'Funcionario', fill=True, border=1)
+        pdf.cell(40, 7,  'Cargo',       fill=True, border=1)
+        pdf.cell(30, 7,  'Valor Pago',  fill=True, border=1, align='R')
+        pdf.cell(20, 7,  '% Saidas',    fill=True, border=1, align='C', ln=True)
+        pdf.set_font('Helvetica', '', 9)
+        for i, (nome, cargo, total) in enumerate(top_funcionarios, 1):
+            pct = (float(total) / saidas_total * 100) if saidas_total else 0
+            pdf.cell(10, 6, str(i),           border=1, align='C')
+            pdf.cell(90, 6, str(nome)[:48],   border=1)
+            pdf.cell(40, 6, str(cargo or '-')[:22], border=1)
+            pdf.cell(30, 6, fmt_valor(total), border=1, align='R')
+            pdf.cell(20, 6, f'{pct:.1f}%',    border=1, align='C', ln=True)
+        pdf.ln(3)
+
+    # ── 10. LANÇAMENTOS DETALHADOS (zebrado + totais) ─────────────────────
+    if lancamentos:
+        pdf.add_page()
+        pdf.section_title('LANCAMENTOS DETALHADOS')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_fill_color(30, 64, 175)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(20, 7, 'Data',       fill=True, border=1, align='C')
+        pdf.cell(65, 7, 'Descricao',  fill=True, border=1)
+        pdf.cell(32, 7, 'Categoria',  fill=True, border=1)
+        pdf.cell(30, 7, 'Obra',       fill=True, border=1)
+        pdf.cell(15, 7, 'Tipo',       fill=True, border=1, align='C')
+        pdf.cell(28, 7, 'Valor',      fill=True, border=1, align='R', ln=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Helvetica', '', 8.5)
+        for idx, l in enumerate(lancamentos):
+            if idx % 2 == 0:
+                pdf.set_fill_color(249, 250, 251)
+                fill = True
+            else:
+                fill = False
             tipo_txt = 'Entrada' if l.type == 'entrada' else 'Saida'
-            desc = l.description[:45] if len(l.description) > 45 else l.description
-            cat_nome = l.category.name[:22] if l.category else '-'
-            pdf.cell(22, 6, l.date.strftime('%d/%m/%Y'), border=1)
-            pdf.cell(75, 6, desc, border=1)
-            pdf.cell(40, 6, cat_nome, border=1)
-            pdf.cell(18, 6, tipo_txt, border=1, align='C')
-            pdf.cell(35, 6, fmt_valor(l.value), border=1, align='R', ln=True)
+            desc = l.description[:38] if len(l.description) > 38 else l.description
+            cat_nome = (l.category.name[:18] if l.category else '-')
+            obra = (l.contract.number[:14] if l.contract else '-')
+            pdf.cell(20, 6, l.date.strftime('%d/%m/%Y'), border=1, align='C', fill=fill)
+            pdf.cell(65, 6, desc,     border=1, fill=fill)
+            pdf.cell(32, 6, cat_nome, border=1, fill=fill)
+            pdf.cell(30, 6, obra,     border=1, fill=fill)
+            pdf.cell(15, 6, tipo_txt, border=1, align='C', fill=fill)
+            if l.type == 'entrada':
+                pdf.set_text_color(22, 101, 52)
+            else:
+                pdf.set_text_color(153, 27, 27)
+            pdf.cell(28, 6, fmt_valor(l.value), border=1, align='R', fill=fill, ln=True)
+            pdf.set_text_color(0, 0, 0)
+        # Totais
+        pdf.set_font('Helvetica', 'B', 9.5)
+        pdf.set_fill_color(30, 64, 175)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(162, 7, 'TOTAIS DO PERIODO', fill=True, border=1, align='R')
+        pdf.cell(28, 7,  fmt_valor(entradas_total - saidas_total), fill=True, border=1, align='R', ln=True)
+        pdf.set_text_color(0, 0, 0)
 
     pdf_bytes = pdf.output()
     response = make_response(bytes(pdf_bytes))
     response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename=DFC_{ano}_{mes:02d}.pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=DFC_NunesSantos_{ano}_{mes:02d}.pdf'
     return response
 
 # ─── RELATÓRIO COMPARATIVO ────────────────────────────────────────────────────
