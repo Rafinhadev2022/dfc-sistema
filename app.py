@@ -761,6 +761,13 @@ def relatorios():
             meses_disponiveis.append({'ano': y, 'mes': m,
                 'label': date(y, m, 1).strftime('%B/%Y').capitalize()})
 
+    # Listas para os filtros do PDF personalizado
+    contratos_f    = Contract.query.order_by(Contract.number).all()
+    centros_f      = CostCenter.query.order_by(CostCenter.name).all()
+    fornecedores_f = Supplier.query.filter_by(status='ativo').order_by(Supplier.name).all()
+    funcionarios_f = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
+    categorias_f   = Category.query.filter_by(active=True).order_by(Category.type, Category.name).all()
+
     return render_template('relatorios/index.html',
         entradas=entradas, saidas=saidas, saldo=saldo,
         cat_entradas=cat_entradas, cat_saidas=cat_saidas,
@@ -769,123 +776,204 @@ def relatorios():
         dias_labels=json.dumps(dias_labels),
         dias_entradas_vals=json.dumps(dias_entradas_vals),
         dias_saidas_vals=json.dumps(dias_saidas_vals),
-        meses_disponiveis=meses_disponiveis
+        meses_disponiveis=meses_disponiveis,
+        contratos_f=contratos_f, centros_f=centros_f,
+        fornecedores_f=fornecedores_f, funcionarios_f=funcionarios_f,
+        categorias_f=categorias_f,
     )
 
 @app.route('/relatorios/pdf')
 @login_required
 def relatorio_pdf():
-    mes = request.args.get('mes', date.today().month, type=int)
-    ano = request.args.get('ano', date.today().year, type=int)
-    inicio = date(ano, mes, 1)
-    fim = (inicio + relativedelta(months=1)) - timedelta(days=1)
+    # ── PERÍODO ────────────────────────────────────────────────────────────
+    data_ini_str = request.args.get('data_ini', '').strip()
+    data_fim_str = request.args.get('data_fim', '').strip()
+    if data_ini_str and data_fim_str:
+        try:
+            inicio = datetime.strptime(data_ini_str, '%Y-%m-%d').date()
+            fim    = datetime.strptime(data_fim_str, '%Y-%m-%d').date()
+        except ValueError:
+            mes = request.args.get('mes', date.today().month, type=int)
+            ano = request.args.get('ano', date.today().year, type=int)
+            inicio = date(ano, mes, 1)
+            fim = (inicio + relativedelta(months=1)) - timedelta(days=1)
+    else:
+        mes = request.args.get('mes', date.today().month, type=int)
+        ano = request.args.get('ano', date.today().year, type=int)
+        inicio = date(ano, mes, 1)
+        fim = (inicio + relativedelta(months=1)) - timedelta(days=1)
 
-    entradas_total = db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'entrada',
-        Transaction.date >= inicio, Transaction.date <= fim,
-        Transaction.status == 'realizado'
-    ).scalar() or 0
+    # ── FILTROS ────────────────────────────────────────────────────────────
+    f_tipo     = request.args.get('tipo_filter', '').strip()           # entrada / saida / ''(ambos)
+    f_status   = request.args.get('status_filter', 'realizado').strip() # realizado / previsto / todos
+    def _id(key):
+        v = request.args.get(key, '').strip()
+        return int(v) if v.isdigit() else None
+    f_contract = _id('contract_id')
+    f_cc       = _id('cost_center_id')
+    f_supplier = _id('supplier_id')
+    f_employee = _id('employee_id')
+    f_category = _id('category_id')
 
-    saidas_total = db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'saida',
-        Transaction.date >= inicio, Transaction.date <= fim,
-        Transaction.status == 'realizado'
-    ).scalar() or 0
+    def aplicar_filtros(q, tipo_fixo=None, status_fixo=None):
+        """Adiciona todos os filtros comuns a uma query de Transaction."""
+        tipo = tipo_fixo if tipo_fixo is not None else (f_tipo if f_tipo else None)
+        if tipo:
+            q = q.filter(Transaction.type == tipo)
+        status = status_fixo if status_fixo is not None else f_status
+        if status and status != 'todos':
+            q = q.filter(Transaction.status == status)
+        if f_contract:
+            q = q.filter(Transaction.contract_id == f_contract)
+        if f_cc:
+            q = q.filter(Transaction.cost_center_id == f_cc)
+        if f_supplier:
+            q = q.filter(Transaction.supplier_id == f_supplier)
+        if f_employee:
+            q = q.filter(Transaction.employee_id == f_employee)
+        if f_category:
+            q = q.filter(Transaction.category_id == f_category)
+        return q
 
-    lancamentos = Transaction.query.filter(
-        Transaction.date >= inicio, Transaction.date <= fim,
-        Transaction.status == 'realizado'
-    ).order_by(Transaction.date.asc(), Transaction.type.asc()).all()
+    # ── SEÇÕES ─────────────────────────────────────────────────────────────
+    secoes_raw = request.args.getlist('secao')
+    SECOES_ALL = {'resumo', 'comparativo', 'previstos', 'cat_ent', 'cat_sai',
+                  'por_obra', 'por_cc', 'top_forn', 'top_func', 'detalhado'}
+    secoes = set(secoes_raw) if secoes_raw else SECOES_ALL
 
-    cat_entradas = db.session.query(
+    # ── TOTAIS COM FILTROS ────────────────────────────────────────────────
+    # Status alvo: se usuário pediu "previsto", os "totais" viram dos previstos;
+    # se pediu "todos", somamos ambos. Default = realizado.
+    status_totais = f_status if f_status in ('realizado', 'previsto') else None  # None = todos
+
+    q_ent = aplicar_filtros(db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.date >= inicio, Transaction.date <= fim),
+        tipo_fixo='entrada', status_fixo=status_totais)
+    entradas_total = float(q_ent.scalar() or 0)
+
+    q_sai = aplicar_filtros(db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.date >= inicio, Transaction.date <= fim),
+        tipo_fixo='saida', status_fixo=status_totais)
+    saidas_total = float(q_sai.scalar() or 0)
+
+    # Lançamentos detalhados - respeita TODOS os filtros incluindo tipo e status do usuário
+    q_lanc = aplicar_filtros(Transaction.query.filter(
+        Transaction.date >= inicio, Transaction.date <= fim))
+    lancamentos = q_lanc.order_by(Transaction.date.asc(), Transaction.type.asc()).all()
+
+    cat_entradas = aplicar_filtros(db.session.query(
         Category.name, func.sum(Transaction.value).label('total')
     ).join(Transaction).filter(
-        Transaction.type == 'entrada',
-        Transaction.date >= inicio, Transaction.date <= fim,
-        Transaction.status == 'realizado'
+        Transaction.date >= inicio, Transaction.date <= fim),
+        tipo_fixo='entrada', status_fixo=status_totais
     ).group_by(Category.id).order_by(func.sum(Transaction.value).desc()).all()
 
-    cat_saidas = db.session.query(
+    cat_saidas = aplicar_filtros(db.session.query(
         Category.name, func.sum(Transaction.value).label('total')
     ).join(Transaction).filter(
-        Transaction.type == 'saida',
-        Transaction.date >= inicio, Transaction.date <= fim,
-        Transaction.status == 'realizado'
+        Transaction.date >= inicio, Transaction.date <= fim),
+        tipo_fixo='saida', status_fixo=status_totais
     ).group_by(Category.id).order_by(func.sum(Transaction.value).desc()).all()
 
     # ── DADOS ADICIONAIS PARA O RELATÓRIO ──────────────────────────────────
     # Saldo anterior (acumulado até o dia anterior ao início do período)
-    entradas_ant = db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'entrada', Transaction.date < inicio,
-        Transaction.status == 'realizado'
-    ).scalar() or 0
-    saidas_ant = db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'saida', Transaction.date < inicio,
-        Transaction.status == 'realizado'
-    ).scalar() or 0
+    # - usa APENAS os filtros estruturais (obra/cc/fornecedor/...) mas sempre 'realizado'
+    def _saldo_ant_query(tipo):
+        q = db.session.query(func.sum(Transaction.value)).filter(
+            Transaction.type == tipo, Transaction.date < inicio,
+            Transaction.status == 'realizado'
+        )
+        if f_contract:
+            q = q.filter(Transaction.contract_id == f_contract)
+        if f_cc:       q = q.filter(Transaction.cost_center_id == f_cc)
+        if f_supplier: q = q.filter(Transaction.supplier_id == f_supplier)
+        if f_employee: q = q.filter(Transaction.employee_id == f_employee)
+        if f_category: q = q.filter(Transaction.category_id == f_category)
+        return q
+    entradas_ant = _saldo_ant_query('entrada').scalar() or 0
+    saidas_ant   = _saldo_ant_query('saida').scalar() or 0
     saldo_anterior = float(entradas_ant) - float(saidas_ant)
-    saldo = float(entradas_total) - float(saidas_total)
+    saldo = entradas_total - saidas_total
     saldo_final = saldo_anterior + saldo
 
-    # Mês anterior para comparativo
-    mes_ant_dt = inicio - relativedelta(months=1)
-    ini_ma = date(mes_ant_dt.year, mes_ant_dt.month, 1)
-    fim_ma = (ini_ma + relativedelta(months=1)) - timedelta(days=1)
-    ent_ma = float(db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'entrada', Transaction.date >= ini_ma,
-        Transaction.date <= fim_ma, Transaction.status == 'realizado'
-    ).scalar() or 0)
-    sai_ma = float(db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'saida', Transaction.date >= ini_ma,
-        Transaction.date <= fim_ma, Transaction.status == 'realizado'
-    ).scalar() or 0)
+    # Período anterior de mesmo tamanho (para comparativo)
+    dias_periodo = (fim - inicio).days
+    ini_ma = inicio - timedelta(days=dias_periodo + 1)
+    fim_ma = inicio - timedelta(days=1)
+    def _comp_query(tipo):
+        return aplicar_filtros(
+            db.session.query(func.sum(Transaction.value)).filter(
+                Transaction.date >= ini_ma, Transaction.date <= fim_ma),
+            tipo_fixo=tipo, status_fixo=status_totais)
+    ent_ma = float(_comp_query('entrada').scalar() or 0)
+    sai_ma = float(_comp_query('saida').scalar() or 0)
     saldo_ma = ent_ma - sai_ma
 
-    # Previstos (lançamentos com status = 'previsto' no período)
-    prev_entradas = float(db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'entrada', Transaction.date >= inicio,
-        Transaction.date <= fim, Transaction.status == 'previsto'
-    ).scalar() or 0)
-    prev_saidas = float(db.session.query(func.sum(Transaction.value)).filter(
-        Transaction.type == 'saida', Transaction.date >= inicio,
-        Transaction.date <= fim, Transaction.status == 'previsto'
-    ).scalar() or 0)
+    # Previstos (lançamentos com status = 'previsto' no período) - sem filtro de tipo do usuário
+    def _prev_query(tipo):
+        return aplicar_filtros(
+            db.session.query(func.sum(Transaction.value)).filter(
+                Transaction.date >= inicio, Transaction.date <= fim),
+            tipo_fixo=tipo, status_fixo='previsto')
+    prev_entradas = float(_prev_query('entrada').scalar() or 0)
+    prev_saidas   = float(_prev_query('saida').scalar() or 0)
 
     # Por obra / contrato
-    por_obra = db.session.query(
+    por_obra = aplicar_filtros(db.session.query(
         Contract.number, Contract.client,
         func.sum(case((Transaction.type == 'entrada', Transaction.value), else_=0)).label('ent'),
         func.sum(case((Transaction.type == 'saida',   Transaction.value), else_=0)).label('sai'),
     ).join(Transaction, Transaction.contract_id == Contract.id).filter(
-        Transaction.date >= inicio, Transaction.date <= fim,
-        Transaction.status == 'realizado'
+        Transaction.date >= inicio, Transaction.date <= fim),
+        status_fixo=status_totais
     ).group_by(Contract.id).order_by(func.sum(Transaction.value).desc()).all()
 
     # Por centro de custo
-    por_cc = db.session.query(
+    por_cc = aplicar_filtros(db.session.query(
         CostCenter.code, CostCenter.name,
         func.sum(case((Transaction.type == 'entrada', Transaction.value), else_=0)).label('ent'),
         func.sum(case((Transaction.type == 'saida',   Transaction.value), else_=0)).label('sai'),
     ).join(Transaction, Transaction.cost_center_id == CostCenter.id).filter(
-        Transaction.date >= inicio, Transaction.date <= fim,
-        Transaction.status == 'realizado'
+        Transaction.date >= inicio, Transaction.date <= fim),
+        status_fixo=status_totais
     ).group_by(CostCenter.id).order_by(func.sum(Transaction.value).desc()).all()
 
     # Top 5 fornecedores (pagamentos)
-    top_fornecedores = db.session.query(
+    top_fornecedores = aplicar_filtros(db.session.query(
         Supplier.name, func.sum(Transaction.value).label('total')
     ).join(Transaction, Transaction.supplier_id == Supplier.id).filter(
-        Transaction.type == 'saida', Transaction.date >= inicio,
-        Transaction.date <= fim, Transaction.status == 'realizado'
+        Transaction.date >= inicio, Transaction.date <= fim),
+        tipo_fixo='saida', status_fixo=status_totais
     ).group_by(Supplier.id).order_by(func.sum(Transaction.value).desc()).limit(5).all()
 
     # Top 5 funcionários (adiantamentos/pagamentos)
-    top_funcionarios = db.session.query(
+    top_funcionarios = aplicar_filtros(db.session.query(
         Employee.name, Employee.role, func.sum(Transaction.value).label('total')
     ).join(Transaction, Transaction.employee_id == Employee.id).filter(
-        Transaction.type == 'saida', Transaction.date >= inicio,
-        Transaction.date <= fim, Transaction.status == 'realizado'
+        Transaction.date >= inicio, Transaction.date <= fim),
+        tipo_fixo='saida', status_fixo=status_totais
     ).group_by(Employee.id).order_by(func.sum(Transaction.value).desc()).limit(5).all()
+
+    # ── LABELS DOS FILTROS APLICADOS (pra mostrar no PDF) ─────────────────
+    filtros_aplicados = []
+    if f_tipo:     filtros_aplicados.append(f"Tipo: {'Entradas' if f_tipo=='entrada' else 'Saidas'}")
+    if f_status and f_status != 'realizado':
+        filtros_aplicados.append(f"Status: {f_status.capitalize()}")
+    if f_contract:
+        c = Contract.query.get(f_contract)
+        if c: filtros_aplicados.append(f"Obra: {c.number} - {c.client}")
+    if f_cc:
+        cc = CostCenter.query.get(f_cc)
+        if cc: filtros_aplicados.append(f"C.Custo: {cc.name}")
+    if f_supplier:
+        s = Supplier.query.get(f_supplier)
+        if s: filtros_aplicados.append(f"Fornecedor: {s.name}")
+    if f_employee:
+        e = Employee.query.get(f_employee)
+        if e: filtros_aplicados.append(f"Funcionario: {e.name}")
+    if f_category:
+        cat = Category.query.get(f_category)
+        if cat: filtros_aplicados.append(f"Categoria: {cat.name}")
 
     # ── CLASSE PDF COM CABEÇALHO E RODAPÉ ──────────────────────────────────
     def fmt_valor(v):
@@ -980,53 +1068,82 @@ def relatorio_pdf():
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
 
-    # ── 1. RESUMO EXECUTIVO ────────────────────────────────────────────────
-    pdf.section_title('RESUMO EXECUTIVO')
-    pdf.kv_row('Saldo anterior (acumulado)', fmt_valor(saldo_anterior), (243, 244, 246), True)
-    pdf.kv_row('(+) Total de Entradas', fmt_valor(entradas_total), (220, 252, 231))
-    pdf.kv_row('(-) Total de Saidas',   fmt_valor(saidas_total),   (254, 226, 226))
-    fill_saldo = (220, 252, 231) if saldo >= 0 else (254, 226, 226)
-    pdf.kv_row('= Saldo do Periodo', fmt_valor(saldo), fill_saldo, True, True)
-    fill_final = (219, 234, 254) if saldo_final >= 0 else (254, 226, 226)
-    pdf.kv_row('SALDO ACUMULADO FINAL', fmt_valor(saldo_final), fill_final, True, True)
-    pdf.ln(3)
-
-    # ── 2. COMPARATIVO COM MÊS ANTERIOR ───────────────────────────────────
-    pdf.section_title('COMPARATIVO COM MES ANTERIOR')
-    mes_ant_label = ini_ma.strftime('%m/%Y')
-    pdf.set_font('Helvetica', 'B', 9)
-    pdf.set_fill_color(224, 231, 255)
-    pdf.cell(60, 7, 'Indicador', fill=True, border=1)
-    pdf.cell(45, 7, f'Mes Anterior ({mes_ant_label})', fill=True, border=1, align='R')
-    pdf.cell(45, 7, 'Periodo Atual', fill=True, border=1, align='R')
-    pdf.cell(40, 7, 'Variacao', fill=True, border=1, align='C', ln=True)
-    pdf.set_font('Helvetica', '', 9)
-    for label, v_ma, v_at in [
-        ('Entradas', ent_ma, entradas_total),
-        ('Saidas',   sai_ma, saidas_total),
-        ('Saldo',    saldo_ma, saldo),
-    ]:
-        pdf.cell(60, 6, label, border=1)
-        pdf.cell(45, 6, fmt_valor(v_ma), border=1, align='R')
-        pdf.cell(45, 6, fmt_valor(v_at), border=1, align='R')
-        var_txt = fmt_var(v_at, v_ma)
-        if var_txt.startswith('+'):
-            pdf.set_text_color(22, 101, 52) if label == 'Entradas' else pdf.set_text_color(153, 27, 27)
-        elif var_txt.startswith('-'):
-            pdf.set_text_color(153, 27, 27) if label == 'Entradas' else pdf.set_text_color(22, 101, 52)
-        pdf.cell(40, 6, var_txt, border=1, align='C', ln=True)
+    # ── CAIXA DE FILTROS APLICADOS ─────────────────────────────────────────
+    if filtros_aplicados:
+        pdf.set_fill_color(255, 251, 235)   # amarelo clarinho
+        pdf.set_draw_color(234, 179, 8)
+        pdf.set_line_width(0.4)
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_text_color(120, 53, 15)
+        pdf.cell(190, 6, '  FILTROS APLICADOS:', fill=True, border=1, ln=True)
+        pdf.set_font('Helvetica', '', 9)
+        # Junta em uma linha, quebra se passar de ~110 chars
+        linhas = []
+        atual = ''
+        for f in filtros_aplicados:
+            if len(atual) + len(f) + 3 > 110:
+                linhas.append(atual)
+                atual = f
+            else:
+                atual = (atual + '  |  ' + f) if atual else f
+        if atual:
+            linhas.append(atual)
+        for linha in linhas:
+            pdf.cell(190, 5, '  ' + clean_txt(linha), fill=True, border='LR', ln=True)
+        pdf.cell(190, 1, '', fill=True, border='LRB', ln=True)
         pdf.set_text_color(0, 0, 0)
-    pdf.ln(3)
+        pdf.set_line_width(0.2)
+        pdf.ln(3)
+
+    # ── 1. RESUMO EXECUTIVO ────────────────────────────────────────────────
+    if 'resumo' in secoes:
+        pdf.section_title('RESUMO EXECUTIVO')
+        pdf.kv_row('Saldo anterior (acumulado)', fmt_valor(saldo_anterior), (243, 244, 246), True)
+        pdf.kv_row('(+) Total de Entradas', fmt_valor(entradas_total), (220, 252, 231))
+        pdf.kv_row('(-) Total de Saidas',   fmt_valor(saidas_total),   (254, 226, 226))
+        fill_saldo = (220, 252, 231) if saldo >= 0 else (254, 226, 226)
+        pdf.kv_row('= Saldo do Periodo', fmt_valor(saldo), fill_saldo, True, True)
+        fill_final = (219, 234, 254) if saldo_final >= 0 else (254, 226, 226)
+        pdf.kv_row('SALDO ACUMULADO FINAL', fmt_valor(saldo_final), fill_final, True, True)
+        pdf.ln(3)
+
+    # ── 2. COMPARATIVO COM PERÍODO ANTERIOR ───────────────────────────────
+    if 'comparativo' in secoes:
+        pdf.section_title('COMPARATIVO COM PERIODO ANTERIOR')
+        periodo_ant_label = f'{ini_ma.strftime("%d/%m")} a {fim_ma.strftime("%d/%m/%Y")}'
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_fill_color(224, 231, 255)
+        pdf.cell(50, 7, 'Indicador', fill=True, border=1)
+        pdf.cell(55, 7, f'Periodo Anterior ({periodo_ant_label})', fill=True, border=1, align='R')
+        pdf.cell(45, 7, 'Periodo Atual', fill=True, border=1, align='R')
+        pdf.cell(40, 7, 'Variacao', fill=True, border=1, align='C', ln=True)
+        pdf.set_font('Helvetica', '', 9)
+        for label, v_ma, v_at in [
+            ('Entradas', ent_ma, entradas_total),
+            ('Saidas',   sai_ma, saidas_total),
+            ('Saldo',    saldo_ma, saldo),
+        ]:
+            pdf.cell(50, 6, label, border=1)
+            pdf.cell(55, 6, fmt_valor(v_ma), border=1, align='R')
+            pdf.cell(45, 6, fmt_valor(v_at), border=1, align='R')
+            var_txt = fmt_var(v_at, v_ma)
+            if var_txt.startswith('+'):
+                pdf.set_text_color(22, 101, 52) if label == 'Entradas' else pdf.set_text_color(153, 27, 27)
+            elif var_txt.startswith('-'):
+                pdf.set_text_color(153, 27, 27) if label == 'Entradas' else pdf.set_text_color(22, 101, 52)
+            pdf.cell(40, 6, var_txt, border=1, align='C', ln=True)
+            pdf.set_text_color(0, 0, 0)
+        pdf.ln(3)
 
     # ── 3. PREVISTOS (A REALIZAR) NO PERÍODO ──────────────────────────────
-    if prev_entradas or prev_saidas:
+    if 'previstos' in secoes and (prev_entradas or prev_saidas):
         pdf.section_title('LANCAMENTOS PREVISTOS NO PERIODO (a realizar)')
         pdf.kv_row('Entradas previstas (a receber)', fmt_valor(prev_entradas), (254, 243, 199))
         pdf.kv_row('Saidas previstas (a pagar)',     fmt_valor(prev_saidas),   (254, 243, 199))
         pdf.ln(3)
 
     # ── 4. ENTRADAS POR CATEGORIA (com %) ─────────────────────────────────
-    if cat_entradas:
+    if 'cat_ent' in secoes and cat_entradas:
         pdf.section_title('ENTRADAS POR CATEGORIA')
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_fill_color(209, 250, 229)
@@ -1047,7 +1164,7 @@ def relatorio_pdf():
         pdf.ln(3)
 
     # ── 5. SAÍDAS POR CATEGORIA (com %) ───────────────────────────────────
-    if cat_saidas:
+    if 'cat_sai' in secoes and cat_saidas:
         pdf.section_title('SAIDAS POR CATEGORIA')
         pdf.set_font('Helvetica', 'B', 10)
         pdf.set_fill_color(254, 205, 211)
@@ -1068,7 +1185,7 @@ def relatorio_pdf():
         pdf.ln(3)
 
     # ── 6. ANÁLISE POR OBRA / CONTRATO ────────────────────────────────────
-    if por_obra:
+    if 'por_obra' in secoes and por_obra:
         if pdf.get_y() > 220:
             pdf.add_page()
         pdf.section_title('ANALISE POR OBRA / CONTRATO')
@@ -1095,7 +1212,7 @@ def relatorio_pdf():
         pdf.ln(3)
 
     # ── 7. ANÁLISE POR CENTRO DE CUSTO ────────────────────────────────────
-    if por_cc:
+    if 'por_cc' in secoes and por_cc:
         if pdf.get_y() > 220:
             pdf.add_page()
         pdf.section_title('ANALISE POR CENTRO DE CUSTO')
@@ -1122,7 +1239,7 @@ def relatorio_pdf():
         pdf.ln(3)
 
     # ── 8. TOP 5 FORNECEDORES ─────────────────────────────────────────────
-    if top_fornecedores:
+    if 'top_forn' in secoes and top_fornecedores:
         if pdf.get_y() > 235:
             pdf.add_page()
         pdf.section_title('TOP 5 FORNECEDORES (por valor pago)')
@@ -1142,7 +1259,7 @@ def relatorio_pdf():
         pdf.ln(3)
 
     # ── 9. TOP 5 FUNCIONÁRIOS ─────────────────────────────────────────────
-    if top_funcionarios:
+    if 'top_func' in secoes and top_funcionarios:
         if pdf.get_y() > 235:
             pdf.add_page()
         pdf.section_title('TOP 5 FUNCIONARIOS (adiantamentos/pagamentos)')
@@ -1164,7 +1281,7 @@ def relatorio_pdf():
         pdf.ln(3)
 
     # ── 10. LANÇAMENTOS DETALHADOS (zebrado + totais) ─────────────────────
-    if lancamentos:
+    if 'detalhado' in secoes and lancamentos:
         pdf.add_page()
         pdf.section_title('LANCAMENTOS DETALHADOS')
         pdf.set_font('Helvetica', 'B', 9)

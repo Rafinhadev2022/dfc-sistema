@@ -9,7 +9,8 @@
     <h2 class="panel-title">Selecionar Período</h2>
     <div style="display:flex;gap:8px">
       <a href="{{ url_for('relatorio_comparativo') }}" class="btn btn-outline btn-sm">Comparativo</a>
-      <a href="{{ url_for('relatorio_pdf', mes=mes, ano=ano) }}" class="btn btn-danger btn-sm" target="_blank">⬇ Download PDF</a>
+      <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('pdf-custom-panel').scrollIntoView({behavior:'smooth'})">⚙ Personalizar PDF</button>
+      <a href="{{ url_for('relatorio_pdf', mes=mes, ano=ano) }}" class="btn btn-danger btn-sm" target="_blank">⬇ PDF rápido</a>
     </div>
   </div>
   <div class="panel-body">
@@ -36,6 +37,148 @@
         <div class="form-group form-group-btn">
           <button type="submit" class="btn btn-primary">Gerar Relatório</button>
         </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Painel: PDF personalizado com filtros -->
+<div class="panel" id="pdf-custom-panel">
+  <div class="panel-header">
+    <h2 class="panel-title">⚙ Gerar PDF Personalizado</h2>
+    <span style="font-size:12px;color:var(--text-muted)">Filtre os dados e escolha quais seções aparecem no PDF</span>
+  </div>
+  <div class="panel-body">
+    <form method="GET" action="{{ url_for('relatorio_pdf') }}" target="_blank">
+
+      <!-- Período customizado -->
+      <h3 style="font-size:13px;font-weight:600;margin:4px 0 10px;color:var(--accent)">📅 Período</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Data início</label>
+          <input type="date" name="data_ini" class="form-control" value="{{ inicio.strftime('%Y-%m-%d') }}">
+        </div>
+        <div class="form-group">
+          <label>Data fim</label>
+          <input type="date" name="data_fim" class="form-control" value="{{ fim.strftime('%Y-%m-%d') }}">
+        </div>
+      </div>
+
+      <!-- Filtros de conteúdo -->
+      <h3 style="font-size:13px;font-weight:600;margin:18px 0 10px;color:var(--accent)">🔎 Filtros de conteúdo</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Tipo</label>
+          <select name="tipo_filter" class="form-control">
+            <option value="">Entradas e Saídas</option>
+            <option value="entrada">Somente Entradas</option>
+            <option value="saida">Somente Saídas</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status_filter" class="form-control">
+            <option value="realizado" selected>Realizados</option>
+            <option value="previsto">Previstos</option>
+            <option value="todos">Realizados + Previstos</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Obra / Contrato</label>
+          <select name="contract_id" class="form-control">
+            <option value="">— Todas as obras —</option>
+            {% for c in contratos_f %}
+            <option value="{{ c.id }}">{{ c.number }} — {{ c.client }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Centro de Custo</label>
+          <select name="cost_center_id" class="form-control">
+            <option value="">— Todos —</option>
+            {% for cc in centros_f %}
+            <option value="{{ cc.id }}">{% if cc.code %}[{{ cc.code }}] {% endif %}{{ cc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Fornecedor</label>
+          <select name="supplier_id" class="form-control">
+            <option value="">— Todos —</option>
+            {% for s in fornecedores_f %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Funcionário</label>
+          <select name="employee_id" class="form-control">
+            <option value="">— Todos —</option>
+            {% for f in funcionarios_f %}
+            <option value="{{ f.id }}">{{ f.name }}{% if f.role %} — {{ f.role }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Categoria</label>
+        <select name="category_id" class="form-control">
+          <option value="">— Todas as categorias —</option>
+          {% for cat in categorias_f %}
+          <option value="{{ cat.id }}">[{{ 'E' if cat.type == 'entrada' else 'S' }}] {{ cat.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Seções a incluir -->
+      <h3 style="font-size:13px;font-weight:600;margin:18px 0 10px;color:var(--accent)">📋 Seções a incluir no PDF</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;padding:12px;background:rgba(79,110,247,0.05);border-radius:8px;border:1px solid rgba(79,110,247,0.15)">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="resumo" checked> Resumo Executivo
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="comparativo" checked> Comparativo período anterior
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="previstos" checked> Lançamentos Previstos
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="cat_ent" checked> Entradas por Categoria
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="cat_sai" checked> Saídas por Categoria
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="por_obra" checked> Análise por Obra
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="por_cc" checked> Análise por Centro de Custo
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="top_forn" checked> Top 5 Fornecedores
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="top_func" checked> Top 5 Funcionários
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" name="secao" value="detalhado" checked> Lançamentos Detalhados
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;font-size:12px">
+        <button type="button" class="btn btn-outline btn-xs" onclick="document.querySelectorAll('input[name=secao]').forEach(c=>c.checked=true)">Marcar tudo</button>
+        <button type="button" class="btn btn-outline btn-xs" onclick="document.querySelectorAll('input[name=secao]').forEach(c=>c.checked=false)">Desmarcar tudo</button>
+      </div>
+
+      <div class="form-actions" style="margin-top:20px">
+        <button type="reset" class="btn btn-outline">Limpar filtros</button>
+        <button type="submit" class="btn btn-danger">⬇ Gerar PDF Personalizado</button>
       </div>
     </form>
   </div>
