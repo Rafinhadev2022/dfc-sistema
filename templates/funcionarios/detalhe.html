@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ funcionario.name }}{% endblock %}
+{% block page_title %}{{ funcionario.name }}{% endblock %}
+
+{% macro fmt(v) %}{{ "R$ {:,.2f}".format(v or 0).replace(",","X").replace(".",",").replace("X",".") }}{% endmacro %}
+
+{% block content %}
+
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Dados do funcionário</h2>
+    <div style="display:flex;gap:8px">
+      <a href="{{ url_for('funcionario_editar', id=funcionario.id) }}" class="btn btn-outline btn-sm">Editar</a>
+      <a href="{{ url_for('funcionarios') }}" class="btn btn-outline btn-sm">← Voltar</a>
+    </div>
+  </div>
+  <div class="panel-body">
+    <div class="cards-grid cards-grid-3">
+      <div>
+        <strong>Cargo</strong><br>{{ funcionario.role or '—' }}
+      </div>
+      <div>
+        <strong>CPF</strong><br>{{ funcionario.cpf or '—' }}
+      </div>
+      <div>
+        <strong>Telefone</strong><br>{{ funcionario.phone or '—' }}
+      </div>
+      <div>
+        <strong>Admissão</strong><br>{{ funcionario.admission_date.strftime('%d/%m/%Y') if funcionario.admission_date else '—' }}
+      </div>
+      <div>
+        <strong>Salário base</strong><br>{{ fmt(funcionario.salary) }}
+      </div>
+      <div>
+        <strong>Obra</strong><br>
+        {% if funcionario.contract %}{{ funcionario.contract.number }} — {{ funcionario.contract.client }}{% else %}—{% endif %}
+      </div>
+      <div>
+        <strong>Status</strong><br>
+        {% if funcionario.status == 'ativo' %}<span class="badge badge-green">Ativo</span>
+        {% elif funcionario.status == 'demitido' %}<span class="badge badge-red">Demitido</span>
+        {% else %}<span class="badge badge-yellow">Afastado</span>{% endif %}
+      </div>
+      <div style="grid-column:span 2">
+        <strong>Observações</strong><br>{{ funcionario.notes or '—' }}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Histórico financeiro</h2>
+    <span style="font-size:13px;color:var(--text-muted)">Total pago (saídas realizadas): <strong style="color:#dc2626">{{ fmt(total_pago) }}</strong></span>
+  </div>
+  <div class="panel-body">
+    {% if lancamentos %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Obra</th>
+            <th class="text-right">Valor</th>
+            <th>Tipo</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in lancamentos %}
+          <tr>
+            <td class="nowrap">{{ t.date.strftime('%d/%m/%Y') }}</td>
+            <td>{{ t.description }}</td>
+            <td><span class="badge badge-gray">{{ t.category.name if t.category else '—' }}</span></td>
+            <td class="text-sm">{% if t.cost_center %}<span class="badge badge-purple">{{ t.cost_center.code or t.cost_center.name[:14] }}</span>{% else %}—{% endif %}</td>
+            <td class="text-right font-bold nowrap {% if t.type == 'entrada' %}text-green{% else %}text-red{% endif %}">
+              {% if t.type == 'entrada' %}+{% else %}−{% endif %} {{ fmt(t.value) }}
+            </td>
+            <td>
+              {% if t.type == 'entrada' %}<span class="badge badge-green">Entrada</span>
+              {% else %}<span class="badge badge-red">Saída</span>{% endif %}
+            </td>
+            <td>
+              {% if t.status == 'realizado' %}<span class="badge badge-green">Realizado</span>
+              {% else %}<span class="badge badge-yellow">Previsto</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <p>Nenhum lançamento vinculado a este funcionário.</p>
+      <a href="{{ url_for('lancamento_novo') }}" class="btn btn-primary">+ Novo Lançamento</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

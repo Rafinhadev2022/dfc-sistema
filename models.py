@@ -66,6 +66,22 @@ class CostCenter(db.Model):
     transactions = db.relationship('Transaction', backref='cost_center', lazy=True)
     bill_reminders = db.relationship('BillReminder', backref='cost_center', lazy=True)
 
+class Employee(db.Model):
+    __tablename__ = 'employees'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    cpf = db.Column(db.String(20))
+    role = db.Column(db.String(100))           # cargo / função
+    salary = db.Column(db.Float, default=0)    # salário base (referência)
+    admission_date = db.Column(db.Date)
+    contract_id = db.Column(db.Integer, db.ForeignKey('contracts.id'), nullable=True)
+    phone = db.Column(db.String(30))
+    notes = db.Column(db.Text)
+    status = db.Column(db.String(15), default='ativo')  # ativo / demitido / afastado
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    contract = db.relationship('Contract', backref='employees', lazy=True)
+    transactions = db.relationship('Transaction', backref='employee', lazy=True)
+
 class Transaction(db.Model):
     __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
@@ -74,6 +90,7 @@ class Transaction(db.Model):
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
     contract_id = db.Column(db.Integer, db.ForeignKey('contracts.id'), nullable=True)
     cost_center_id = db.Column(db.Integer, db.ForeignKey('cost_centers.id'), nullable=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     value = db.Column(db.Float, nullable=False)
     type = db.Column(db.String(10), nullable=False)

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Funcionários{% endblock %}
+{% block page_title %}Funcionários{% endblock %}
+
+{% macro fmt(v) %}{{ "R$ {:,.2f}".format(v or 0).replace(",","X").replace(".",",").replace("X",".") }}{% endmacro %}
+
+{% block content %}
+
+<div class="cards-grid cards-grid-2">
+  <div class="card card-blue">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg></div>
+    <div class="card-content">
+      <span class="card-label">Funcionários ativos</span>
+      <span class="card-value">{{ ativos }}</span>
+    </div>
+  </div>
+  <div class="card card-green">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg></div>
+    <div class="card-content">
+      <span class="card-label">Folha mensal (referência)</span>
+      <span class="card-value" style="font-size:18px">{{ fmt(total_folha) }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Cadastro de Funcionários</h2>
+    <a href="{{ url_for('funcionario_novo') }}" class="btn btn-primary btn-sm">+ Novo Funcionário</a>
+  </div>
+  <div class="panel-body" style="padding-bottom:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="{{ url_for('funcionarios', status='ativo') }}"    class="btn btn-sm {% if status_filtro=='ativo' %}btn-primary{% else %}btn-outline{% endif %}">Ativos</a>
+      <a href="{{ url_for('funcionarios', status='demitido') }}" class="btn btn-sm {% if status_filtro=='demitido' %}btn-primary{% else %}btn-outline{% endif %}">Demitidos</a>
+      <a href="{{ url_for('funcionarios', status='afastado') }}" class="btn btn-sm {% if status_filtro=='afastado' %}btn-primary{% else %}btn-outline{% endif %}">Afastados</a>
+      <a href="{{ url_for('funcionarios', status='todos') }}"    class="btn btn-sm {% if status_filtro=='todos' %}btn-primary{% else %}btn-outline{% endif %}">Todos</a>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    {% if funcionarios %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Nome</th>
+            <th>Cargo</th>
+            <th>CPF</th>
+            <th>Obra vinculada</th>
+            <th class="text-right">Salário</th>
+            <th>Admissão</th>
+            <th>Status</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in funcionarios %}
+          <tr>
+            <td>
+              <a href="{{ url_for('funcionario_detalhe', id=f.id) }}" style="font-weight:600;color:var(--accent)">{{ f.name }}</a>
+              {% if f.phone %}<br><span style="font-size:11px;color:var(--text-muted)">{{ f.phone }}</span>{% endif %}
+            </td>
+            <td>{{ f.role or '—' }}</td>
+            <td class="text-sm">{{ f.cpf or '—' }}</td>
+            <td class="text-sm">
+              {% if f.contract %}<span class="badge badge-blue">{{ f.contract.number }}</span>{% else %}<span style="color:var(--text-muted)">—</span>{% endif %}
+            </td>
+            <td class="text-right nowrap">{{ fmt(f.salary) }}</td>
+            <td class="text-sm">{{ f.admission_date.strftime('%d/%m/%Y') if f.admission_date else '—' }}</td>
+            <td>
+              {% if f.status == 'ativo' %}<span class="badge badge-green">Ativo</span>
+              {% elif f.status == 'demitido' %}<span class="badge badge-red">Demitido</span>
+              {% else %}<span class="badge badge-yellow">Afastado</span>{% endif %}
+            </td>
+            <td class="text-center nowrap">
+              <a href="{{ url_for('funcionario_detalhe', id=f.id) }}" class="btn btn-outline btn-xs">Ver</a>
+              <a href="{{ url_for('funcionario_editar', id=f.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              <form method="POST" action="{{ url_for('funcionario_excluir', id=f.id) }}" style="display:inline" onsubmit="return confirm('Excluir/demitir este funcionário?')">
+                <button class="btn btn-danger btn-xs" type="submit">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>
+      <p>Nenhum funcionário {% if status_filtro != 'todos' %}{{ status_filtro }} {% endif %}cadastrado.</p>
+      <a href="{{ url_for('funcionario_novo') }}" class="btn btn-primary">Cadastrar funcionário</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

@@ -1,6 +1,6 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder, BankStatementEntry
+from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder, BankStatementEntry, Employee
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
@@ -93,6 +93,7 @@ def run_migrations():
     add_col('transactions', 'reconciled',          bool_default_false)
     add_col('transactions', 'reconciled_at',       'TIMESTAMP')
     add_col('transactions', 'bank_reference',      'VARCHAR(120)')
+    add_col('transactions', 'employee_id',         'INTEGER')
 
     # bill_reminders
     add_col('bill_reminders', 'attachment_data',     blob_type)
@@ -373,6 +374,7 @@ def lancamento_novo():
     categorias = Category.query.filter_by(active=True).order_by(Category.type, Category.name).all()
     contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
+    funcionarios = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -382,6 +384,7 @@ def lancamento_novo():
                 category_id=int(request.form['category_id']),
                 contract_id=int(request.form['contract_id']) if request.form.get('contract_id') else None,
                 cost_center_id=int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None,
+                employee_id=int(request.form['employee_id']) if request.form.get('employee_id') else None,
                 value=float(valor_str),
                 type=request.form['type'],
                 status=request.form['status'],
@@ -406,7 +409,7 @@ def lancamento_novo():
             db.session.rollback()
             flash(f'Erro ao salvar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=None, categorias=categorias,
-                           contratos=contratos, centros=centros, hoje=date.today())
+                           contratos=contratos, centros=centros, funcionarios=funcionarios, hoje=date.today())
 
 @app.route('/lancamentos/<int:id>/editar', methods=['GET', 'POST'])
 @login_required
@@ -415,6 +418,7 @@ def lancamento_editar(id):
     categorias = Category.query.filter_by(active=True).order_by(Category.type, Category.name).all()
     contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
+    funcionarios = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -423,6 +427,7 @@ def lancamento_editar(id):
             t.category_id = int(request.form['category_id'])
             t.contract_id = int(request.form['contract_id']) if request.form.get('contract_id') else None
             t.cost_center_id = int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None
+            t.employee_id = int(request.form['employee_id']) if request.form.get('employee_id') else None
             t.value = float(valor_str)
             t.type = request.form['type']
             t.status = request.form['status']
@@ -443,7 +448,7 @@ def lancamento_editar(id):
             db.session.rollback()
             flash(f'Erro ao atualizar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=t, categorias=categorias,
-                           contratos=contratos, centros=centros)
+                           contratos=contratos, centros=centros, funcionarios=funcionarios)
 
 @app.route('/lancamentos/<int:id>/anexo')
 @login_required
@@ -1574,6 +1579,102 @@ def conciliacao_marcar_todos():
     verbo = 'conciliados' if valor_reconciled else 'desmarcados'
     flash(f'{cnt} lançamento(s) {verbo} no período.', 'success')
     return redirect(url_for('conciliacao', mes=mes_str))
+
+# ─── FUNCIONÁRIOS ────────────────────────────────────────────────────────────
+
+@app.route('/funcionarios')
+@login_required
+def funcionarios():
+    status_filtro = request.args.get('status', 'ativo')
+    q = Employee.query
+    if status_filtro != 'todos':
+        q = q.filter_by(status=status_filtro)
+    lista = q.order_by(Employee.name).all()
+    ativos = Employee.query.filter_by(status='ativo').count()
+    total_folha = sum(e.salary or 0 for e in Employee.query.filter_by(status='ativo').all())
+    return render_template('funcionarios/index.html',
+        funcionarios=lista, status_filtro=status_filtro,
+        ativos=ativos, total_folha=total_folha, total=len(lista))
+
+@app.route('/funcionarios/novo', methods=['GET', 'POST'])
+@login_required
+def funcionario_novo():
+    contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
+    if request.method == 'POST':
+        try:
+            salario_str = request.form.get('salary', '0').replace('.', '').replace(',', '.') or '0'
+            adm_str = request.form.get('admission_date', '')
+            adm = datetime.strptime(adm_str, '%Y-%m-%d').date() if adm_str else None
+            e = Employee(
+                name=request.form['name'].strip(),
+                cpf=request.form.get('cpf', '').strip() or None,
+                role=request.form.get('role', '').strip() or None,
+                salary=float(salario_str or 0),
+                admission_date=adm,
+                contract_id=int(request.form['contract_id']) if request.form.get('contract_id') else None,
+                phone=request.form.get('phone', '').strip() or None,
+                notes=request.form.get('notes', '').strip() or None,
+                status=request.form.get('status', 'ativo'),
+            )
+            db.session.add(e)
+            db.session.commit()
+            flash('Funcionário cadastrado!', 'success')
+            return redirect(url_for('funcionarios'))
+        except Exception as exc:
+            db.session.rollback()
+            flash(f'Erro ao salvar: {exc}', 'danger')
+    return render_template('funcionarios/form.html', funcionario=None, contratos=contratos)
+
+@app.route('/funcionarios/<int:id>/editar', methods=['GET', 'POST'])
+@login_required
+def funcionario_editar(id):
+    e = Employee.query.get_or_404(id)
+    contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
+    if request.method == 'POST':
+        try:
+            salario_str = request.form.get('salary', '0').replace('.', '').replace(',', '.') or '0'
+            adm_str = request.form.get('admission_date', '')
+            e.name = request.form['name'].strip()
+            e.cpf = request.form.get('cpf', '').strip() or None
+            e.role = request.form.get('role', '').strip() or None
+            e.salary = float(salario_str or 0)
+            e.admission_date = datetime.strptime(adm_str, '%Y-%m-%d').date() if adm_str else None
+            e.contract_id = int(request.form['contract_id']) if request.form.get('contract_id') else None
+            e.phone = request.form.get('phone', '').strip() or None
+            e.notes = request.form.get('notes', '').strip() or None
+            e.status = request.form.get('status', 'ativo')
+            db.session.commit()
+            flash('Funcionário atualizado!', 'success')
+            return redirect(url_for('funcionarios'))
+        except Exception as exc:
+            db.session.rollback()
+            flash(f'Erro ao atualizar: {exc}', 'danger')
+    return render_template('funcionarios/form.html', funcionario=e, contratos=contratos)
+
+@app.route('/funcionarios/<int:id>/excluir', methods=['POST'])
+@login_required
+def funcionario_excluir(id):
+    e = Employee.query.get_or_404(id)
+    # se houver lançamentos vinculados, apenas desativa
+    if Transaction.query.filter_by(employee_id=id).first():
+        e.status = 'demitido'
+        db.session.commit()
+        flash('Funcionário tem lançamentos vinculados — marcado como demitido.', 'warning')
+    else:
+        db.session.delete(e)
+        db.session.commit()
+        flash('Funcionário excluído.', 'success')
+    return redirect(url_for('funcionarios'))
+
+@app.route('/funcionarios/<int:id>')
+@login_required
+def funcionario_detalhe(id):
+    e = Employee.query.get_or_404(id)
+    # histórico de lançamentos do funcionário
+    lancamentos = Transaction.query.filter_by(employee_id=id).order_by(Transaction.date.desc()).all()
+    total_pago = sum(t.value for t in lancamentos if t.type == 'saida' and t.status == 'realizado')
+    return render_template('funcionarios/detalhe.html', funcionario=e,
+                           lancamentos=lancamentos, total_pago=total_pago)
 
 # ─── IMPORTAÇÃO DE EXTRATO BANCÁRIO ──────────────────────────────────────────
 
