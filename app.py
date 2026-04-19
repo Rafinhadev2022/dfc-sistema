@@ -904,32 +904,41 @@ def relatorio_pdf():
 
     class DFCPdf(FPDF):
         def header(self):
-            # Faixa azul
-            self.set_fill_color(30, 64, 175)
-            self.rect(0, 0, 210, 28, 'F')
+            has_logo = os.path.exists(LOGO_PATH)
+            # Faixa de fundo branca com borda inferior azul (fica bem com logo colorida)
+            self.set_fill_color(255, 255, 255)
+            self.rect(0, 0, 210, 30, 'F')
             # Logo (se existir)
-            if os.path.exists(LOGO_PATH):
+            if has_logo:
                 try:
-                    self.image(LOGO_PATH, x=10, y=5, h=18)
+                    # h=18 com proporção ~2.2 -> w≈40mm, ocupa x=10 a x=50
+                    self.image(LOGO_PATH, x=10, y=4, h=22)
                 except Exception:
-                    pass
-            # Textos de cabeçalho
-            self.set_text_color(255, 255, 255)
-            self.set_font('Helvetica', 'B', 14)
-            self.set_xy(32, 6)
-            self.cell(170, 7, 'NUNES & SANTOS LTDA', align='L')
+                    has_logo = False
+            # Título central
+            self.set_text_color(30, 64, 175)
+            self.set_font('Helvetica', 'B', 15)
+            self.set_xy(60, 7)
+            self.cell(90, 7, 'DEMONSTRACAO DE FLUXO DE CAIXA', align='C')
+            self.set_text_color(80, 80, 80)
             self.set_font('Helvetica', '', 9)
-            self.set_xy(32, 13)
-            self.cell(170, 5, 'CNPJ: 22.892.910/0001-69', align='L')
-            self.set_font('Helvetica', 'B', 11)
-            self.set_xy(32, 18)
-            self.cell(170, 5, 'DEMONSTRACAO DE FLUXO DE CAIXA', align='L')
-            # Período na direita
-            self.set_font('Helvetica', '', 9)
-            self.set_xy(10, 6)
-            self.cell(195, 5, f'Periodo: {periodo_label}', align='R')
-            self.set_xy(10, 12)
-            self.cell(195, 5, f'Emitido: {emissao_label}', align='R')
+            self.set_xy(60, 15)
+            if not has_logo:
+                self.cell(90, 5, 'NUNES & SANTOS LTDA', align='C')
+                self.set_xy(60, 20)
+            self.cell(90, 5, 'CNPJ: 22.892.910/0001-69', align='C')
+            # Período e emissão na direita
+            self.set_text_color(60, 60, 60)
+            self.set_font('Helvetica', '', 8.5)
+            self.set_xy(150, 8)
+            self.cell(55, 4, f'Periodo: {periodo_label}', align='R')
+            self.set_xy(150, 13)
+            self.cell(55, 4, f'Emitido: {emissao_label}', align='R')
+            # Linha decorativa azul inferior
+            self.set_draw_color(30, 64, 175)
+            self.set_line_width(0.8)
+            self.line(10, 30, 200, 30)
+            self.set_line_width(0.2)
             self.set_text_color(0, 0, 0)
             self.set_y(34)
 
