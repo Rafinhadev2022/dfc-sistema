@@ -1,6 +1,6 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder, BankStatementEntry, Employee
+from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder, BankStatementEntry, Employee, Supplier
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
@@ -94,6 +94,7 @@ def run_migrations():
     add_col('transactions', 'reconciled_at',       'TIMESTAMP')
     add_col('transactions', 'bank_reference',      'VARCHAR(120)')
     add_col('transactions', 'employee_id',         'INTEGER')
+    add_col('transactions', 'supplier_id',         'INTEGER')
 
     # bill_reminders
     add_col('bill_reminders', 'attachment_data',     blob_type)
@@ -375,6 +376,7 @@ def lancamento_novo():
     contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     funcionarios = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
+    fornecedores_lista = Supplier.query.filter_by(status='ativo').order_by(Supplier.name).all()
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -385,6 +387,7 @@ def lancamento_novo():
                 contract_id=int(request.form['contract_id']) if request.form.get('contract_id') else None,
                 cost_center_id=int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None,
                 employee_id=int(request.form['employee_id']) if request.form.get('employee_id') else None,
+                supplier_id=int(request.form['supplier_id']) if request.form.get('supplier_id') else None,
                 value=float(valor_str),
                 type=request.form['type'],
                 status=request.form['status'],
@@ -409,7 +412,8 @@ def lancamento_novo():
             db.session.rollback()
             flash(f'Erro ao salvar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=None, categorias=categorias,
-                           contratos=contratos, centros=centros, funcionarios=funcionarios, hoje=date.today())
+                           contratos=contratos, centros=centros, funcionarios=funcionarios,
+                           fornecedores=fornecedores_lista, hoje=date.today())
 
 @app.route('/lancamentos/<int:id>/editar', methods=['GET', 'POST'])
 @login_required
@@ -419,6 +423,7 @@ def lancamento_editar(id):
     contratos = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     funcionarios = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
+    fornecedores_lista = Supplier.query.filter_by(status='ativo').order_by(Supplier.name).all()
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -428,6 +433,7 @@ def lancamento_editar(id):
             t.contract_id = int(request.form['contract_id']) if request.form.get('contract_id') else None
             t.cost_center_id = int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None
             t.employee_id = int(request.form['employee_id']) if request.form.get('employee_id') else None
+            t.supplier_id = int(request.form['supplier_id']) if request.form.get('supplier_id') else None
             t.value = float(valor_str)
             t.type = request.form['type']
             t.status = request.form['status']
@@ -448,7 +454,8 @@ def lancamento_editar(id):
             db.session.rollback()
             flash(f'Erro ao atualizar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=t, categorias=categorias,
-                           contratos=contratos, centros=centros, funcionarios=funcionarios)
+                           contratos=contratos, centros=centros, funcionarios=funcionarios,
+                           fornecedores=fornecedores_lista)
 
 @app.route('/lancamentos/<int:id>/anexo')
 @login_required
@@ -1675,6 +1682,106 @@ def funcionario_detalhe(id):
     total_pago = sum(t.value for t in lancamentos if t.type == 'saida' and t.status == 'realizado')
     return render_template('funcionarios/detalhe.html', funcionario=e,
                            lancamentos=lancamentos, total_pago=total_pago)
+
+# ─── FORNECEDORES ────────────────────────────────────────────────────────────
+
+@app.route('/fornecedores')
+@login_required
+def fornecedores():
+    status_filtro = request.args.get('status', 'ativo')
+    q = Supplier.query
+    if status_filtro != 'todos':
+        q = q.filter_by(status=status_filtro)
+    lista = q.order_by(Supplier.name).all()
+    ativos = Supplier.query.filter_by(status='ativo').count()
+    # total pago por fornecedor nos últimos 12 meses
+    limite = date.today() - timedelta(days=365)
+    total_pago_12m = db.session.query(func.coalesce(func.sum(Transaction.value), 0)).filter(
+        Transaction.supplier_id.isnot(None),
+        Transaction.type == 'saida',
+        Transaction.status == 'realizado',
+        Transaction.date >= limite,
+    ).scalar() or 0
+    return render_template('fornecedores/index.html',
+        fornecedores=lista, status_filtro=status_filtro,
+        ativos=ativos, total_pago_12m=total_pago_12m, total=len(lista))
+
+@app.route('/fornecedores/novo', methods=['GET', 'POST'])
+@login_required
+def fornecedor_novo():
+    if request.method == 'POST':
+        try:
+            s = Supplier(
+                name=request.form['name'].strip(),
+                trade_name=request.form.get('trade_name', '').strip() or None,
+                cnpj_cpf=request.form.get('cnpj_cpf', '').strip() or None,
+                category=request.form.get('category', '').strip() or None,
+                contact_name=request.form.get('contact_name', '').strip() or None,
+                phone=request.form.get('phone', '').strip() or None,
+                email=request.form.get('email', '').strip() or None,
+                address=request.form.get('address', '').strip() or None,
+                bank_info=request.form.get('bank_info', '').strip() or None,
+                notes=request.form.get('notes', '').strip() or None,
+                status=request.form.get('status', 'ativo'),
+            )
+            db.session.add(s)
+            db.session.commit()
+            flash('Fornecedor cadastrado!', 'success')
+            return redirect(url_for('fornecedores'))
+        except Exception as exc:
+            db.session.rollback()
+            flash(f'Erro ao salvar: {exc}', 'danger')
+    return render_template('fornecedores/form.html', fornecedor=None)
+
+@app.route('/fornecedores/<int:id>/editar', methods=['GET', 'POST'])
+@login_required
+def fornecedor_editar(id):
+    s = Supplier.query.get_or_404(id)
+    if request.method == 'POST':
+        try:
+            s.name = request.form['name'].strip()
+            s.trade_name = request.form.get('trade_name', '').strip() or None
+            s.cnpj_cpf = request.form.get('cnpj_cpf', '').strip() or None
+            s.category = request.form.get('category', '').strip() or None
+            s.contact_name = request.form.get('contact_name', '').strip() or None
+            s.phone = request.form.get('phone', '').strip() or None
+            s.email = request.form.get('email', '').strip() or None
+            s.address = request.form.get('address', '').strip() or None
+            s.bank_info = request.form.get('bank_info', '').strip() or None
+            s.notes = request.form.get('notes', '').strip() or None
+            s.status = request.form.get('status', 'ativo')
+            db.session.commit()
+            flash('Fornecedor atualizado!', 'success')
+            return redirect(url_for('fornecedores'))
+        except Exception as exc:
+            db.session.rollback()
+            flash(f'Erro ao atualizar: {exc}', 'danger')
+    return render_template('fornecedores/form.html', fornecedor=s)
+
+@app.route('/fornecedores/<int:id>/excluir', methods=['POST'])
+@login_required
+def fornecedor_excluir(id):
+    s = Supplier.query.get_or_404(id)
+    if Transaction.query.filter_by(supplier_id=id).first():
+        s.status = 'inativo'
+        db.session.commit()
+        flash('Fornecedor tem lançamentos vinculados — marcado como inativo.', 'warning')
+    else:
+        db.session.delete(s)
+        db.session.commit()
+        flash('Fornecedor excluído.', 'success')
+    return redirect(url_for('fornecedores'))
+
+@app.route('/fornecedores/<int:id>')
+@login_required
+def fornecedor_detalhe(id):
+    s = Supplier.query.get_or_404(id)
+    lancamentos = Transaction.query.filter_by(supplier_id=id).order_by(Transaction.date.desc()).all()
+    total_pago = sum(t.value for t in lancamentos if t.type == 'saida' and t.status == 'realizado')
+    total_previsto = sum(t.value for t in lancamentos if t.type == 'saida' and t.status == 'previsto')
+    return render_template('fornecedores/detalhe.html', fornecedor=s,
+                           lancamentos=lancamentos, total_pago=total_pago,
+                           total_previsto=total_previsto)
 
 # ─── IMPORTAÇÃO DE EXTRATO BANCÁRIO ──────────────────────────────────────────
 

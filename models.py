@@ -82,6 +82,23 @@ class Employee(db.Model):
     contract = db.relationship('Contract', backref='employees', lazy=True)
     transactions = db.relationship('Transaction', backref='employee', lazy=True)
 
+class Supplier(db.Model):
+    __tablename__ = 'suppliers'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)            # razão social / nome
+    trade_name = db.Column(db.String(200))                       # nome fantasia
+    cnpj_cpf = db.Column(db.String(20))                          # CNPJ ou CPF
+    category = db.Column(db.String(100))                         # tipo (asfalto, combustível, locação...)
+    contact_name = db.Column(db.String(120))
+    phone = db.Column(db.String(30))
+    email = db.Column(db.String(120))
+    address = db.Column(db.Text)
+    bank_info = db.Column(db.String(255))                        # banco / agência / conta / PIX
+    notes = db.Column(db.Text)
+    status = db.Column(db.String(15), default='ativo')           # ativo / inativo
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    transactions = db.relationship('Transaction', backref='supplier', lazy=True)
+
 class Transaction(db.Model):
     __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
@@ -91,6 +108,7 @@ class Transaction(db.Model):
     contract_id = db.Column(db.Integer, db.ForeignKey('contracts.id'), nullable=True)
     cost_center_id = db.Column(db.Integer, db.ForeignKey('cost_centers.id'), nullable=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     value = db.Column(db.Float, nullable=False)
     type = db.Column(db.String(10), nullable=False)

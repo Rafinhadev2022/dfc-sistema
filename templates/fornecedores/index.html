@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Fornecedores{% endblock %}
+{% block page_title %}Fornecedores{% endblock %}
+
+{% macro fmt(v) %}{{ "R$ {:,.2f}".format(v or 0).replace(",","X").replace(".",",").replace("X",".") }}{% endmacro %}
+
+{% block content %}
+
+<div class="cards-grid cards-grid-2">
+  <div class="card card-blue">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><path d="M16 3h5v5"></path><path d="M3 21l7-7"></path></svg></div>
+    <div class="card-content">
+      <span class="card-label">Fornecedores ativos</span>
+      <span class="card-value">{{ ativos }}</span>
+    </div>
+  </div>
+  <div class="card card-red">
+    <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg></div>
+    <div class="card-content">
+      <span class="card-label">Pago a fornecedores (últimos 12 meses)</span>
+      <span class="card-value" style="font-size:18px">{{ fmt(total_pago_12m) }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Cadastro de Fornecedores</h2>
+    <a href="{{ url_for('fornecedor_novo') }}" class="btn btn-primary btn-sm">+ Novo Fornecedor</a>
+  </div>
+  <div class="panel-body" style="padding-bottom:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <a href="{{ url_for('fornecedores', status='ativo') }}"   class="btn btn-sm {% if status_filtro=='ativo' %}btn-primary{% else %}btn-outline{% endif %}">Ativos</a>
+      <a href="{{ url_for('fornecedores', status='inativo') }}" class="btn btn-sm {% if status_filtro=='inativo' %}btn-primary{% else %}btn-outline{% endif %}">Inativos</a>
+      <a href="{{ url_for('fornecedores', status='todos') }}"   class="btn btn-sm {% if status_filtro=='todos' %}btn-primary{% else %}btn-outline{% endif %}">Todos</a>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    {% if fornecedores %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Razão social / Nome</th>
+            <th>CNPJ/CPF</th>
+            <th>Categoria</th>
+            <th>Contato</th>
+            <th>Telefone</th>
+            <th>Status</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in fornecedores %}
+          <tr>
+            <td>
+              <a href="{{ url_for('fornecedor_detalhe', id=s.id) }}" style="font-weight:600;color:var(--accent)">{{ s.name }}</a>
+              {% if s.trade_name %}<br><span style="font-size:11px;color:var(--text-muted)">{{ s.trade_name }}</span>{% endif %}
+            </td>
+            <td class="text-sm">{{ s.cnpj_cpf or '—' }}</td>
+            <td class="text-sm">{% if s.category %}<span class="badge badge-purple">{{ s.category }}</span>{% else %}—{% endif %}</td>
+            <td class="text-sm">{{ s.contact_name or '—' }}</td>
+            <td class="text-sm">{{ s.phone or '—' }}</td>
+            <td>
+              {% if s.status == 'ativo' %}<span class="badge badge-green">Ativo</span>
+              {% else %}<span class="badge badge-gray">Inativo</span>{% endif %}
+            </td>
+            <td class="text-center nowrap">
+              <a href="{{ url_for('fornecedor_detalhe', id=s.id) }}" class="btn btn-outline btn-xs">Ver</a>
+              <a href="{{ url_for('fornecedor_editar', id=s.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              <form method="POST" action="{{ url_for('fornecedor_excluir', id=s.id) }}" style="display:inline" onsubmit="return confirm('Excluir/desativar este fornecedor?')">
+                <button class="btn btn-danger btn-xs" type="submit">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect><path d="M16 3h5v5"></path><path d="M3 21l7-7"></path></svg>
+      <p>Nenhum fornecedor {% if status_filtro != 'todos' %}{{ status_filtro }} {% endif %}cadastrado.</p>
+      <a href="{{ url_for('fornecedor_novo') }}" class="btn btn-primary">Cadastrar fornecedor</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
