@@ -1330,7 +1330,7 @@ def relatorio_pdf():
     pdf_bytes = pdf.output()
     response = make_response(bytes(pdf_bytes))
     response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename=DFC_NunesSantos_{ano}_{mes:02d}.pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename=DFC_NunesSantos_{inicio.strftime("%Y-%m-%d")}_a_{fim.strftime("%Y-%m-%d")}.pdf'
     return response
 
 # ─── RELATÓRIO COMPARATIVO ────────────────────────────────────────────────────
