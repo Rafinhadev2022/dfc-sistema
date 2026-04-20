@@ -734,25 +734,28 @@ def relatorios():
         Transaction.status == 'realizado'
     ).order_by(Transaction.date.asc(), Transaction.type.asc()).all()
 
-    # Dados para gráfico diário
+    # Dados para gráfico diário — 1 query agrupada em vez de N*2 queries
+    totais_dia = db.session.query(
+        Transaction.date, Transaction.type, func.sum(Transaction.value)
+    ).filter(
+        Transaction.date >= inicio, Transaction.date <= fim,
+        Transaction.status == 'realizado'
+    ).group_by(Transaction.date, Transaction.type).all()
+    mapa_ent = {}
+    mapa_sai = {}
+    for dt, tp, total in totais_dia:
+        if tp == 'entrada':
+            mapa_ent[dt] = float(total or 0)
+        else:
+            mapa_sai[dt] = float(total or 0)
     dias_labels = []
     dias_entradas_vals = []
     dias_saidas_vals = []
     d = inicio
     while d <= fim:
-        e = db.session.query(func.sum(Transaction.value)).filter(
-            Transaction.type == 'entrada',
-            Transaction.date == d,
-            Transaction.status == 'realizado'
-        ).scalar() or 0
-        s = db.session.query(func.sum(Transaction.value)).filter(
-            Transaction.type == 'saida',
-            Transaction.date == d,
-            Transaction.status == 'realizado'
-        ).scalar() or 0
         dias_labels.append(d.strftime('%d'))
-        dias_entradas_vals.append(float(e))
-        dias_saidas_vals.append(float(s))
+        dias_entradas_vals.append(mapa_ent.get(d, 0))
+        dias_saidas_vals.append(mapa_sai.get(d, 0))
         d += timedelta(days=1)
 
     meses_disponiveis = []
@@ -761,9 +764,9 @@ def relatorios():
             meses_disponiveis.append({'ano': y, 'mes': m,
                 'label': date(y, m, 1).strftime('%B/%Y').capitalize()})
 
-    # Listas para os filtros do PDF personalizado
-    contratos_f    = Contract.query.order_by(Contract.number).all()
-    centros_f      = CostCenter.query.order_by(CostCenter.name).all()
+    # Listas para os filtros do PDF personalizado (só ativos, colunas mínimas)
+    contratos_f    = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
+    centros_f      = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     fornecedores_f = Supplier.query.filter_by(status='ativo').order_by(Supplier.name).all()
     funcionarios_f = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
     categorias_f   = Category.query.filter_by(active=True).order_by(Category.type, Category.name).all()
