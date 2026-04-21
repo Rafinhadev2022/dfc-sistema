@@ -155,9 +155,11 @@
             <a href="{{ url_for('lancamento_anexo', id=lancamento.id) }}" target="_blank" class="btn btn-outline btn-xs">Visualizar</a>
             <a href="{{ url_for('lancamento_anexo_download', id=lancamento.id) }}" class="btn btn-outline btn-xs">⬇ Baixar</a>
             {% if current_user.can_edit() %}
-            <form method="POST" action="{{ url_for('lancamento_anexo_excluir', id=lancamento.id) }}" style="display:inline" onsubmit="return confirm('Remover o anexo?')">
-              <button type="submit" class="btn btn-danger btn-xs">Remover</button>
-            </form>
+            {# Nao pode usar <form> aninhado — isso fecha o form pai e quebra o botao Salvar. #}
+            <button type="button" class="btn btn-danger btn-xs"
+                    onclick="removerAnexoLanc('{{ url_for('lancamento_anexo_excluir', id=lancamento.id) }}')">
+              Remover
+            </button>
             {% endif %}
           </div>
         </div>
@@ -189,6 +191,16 @@
 
 {% block scripts %}
 <script>
+// Remove o anexo via POST dinamico (evita form aninhado, que quebra o form principal)
+function removerAnexoLanc(url) {
+  if (!confirm('Remover o anexo?')) return;
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = url;
+  document.body.appendChild(f);
+  f.submit();
+}
+
 function filtrarCategorias(tipo) {
   const select = document.getElementById('categoria-select');
   const options = select.querySelectorAll('option');
@@ -202,51 +214,48 @@ function filtrarCategorias(tipo) {
   }
 }
 
-// Mask de valor monetário
-document.getElementById('valor-input').addEventListener('input', function(e) {
-  let v = e.target.value.replace(/\D/g, '');
-  v = (parseInt(v) / 100).toFixed(2);
-  e.target.value = isNaN(v) ? '' : v.replace('.', ',');
-});
-
-// Inicializar filtro de categorias
+// Tudo dentro de DOMContentLoaded + null-checks para evitar que um
+// erro em um elemento opcional quebre o submit do form principal.
 document.addEventListener('DOMContentLoaded', () => {
-  filtrarCategorias(document.getElementById('tipo-select').value);
-});
+  // Inicializar filtro de categorias
+  const tipoSel = document.getElementById('tipo-select');
+  if (tipoSel) filtrarCategorias(tipoSel.value);
 
-// Upload area
-const uploadArea = document.getElementById('upload-area');
-const fileInput = document.getElementById('attachment');
-const uploadLabel = document.getElementById('upload-label');
+  // Upload area (pode nao existir se algum elemento falhar)
+  const uploadArea = document.getElementById('upload-area');
+  const fileInput = document.getElementById('attachment');
+  const uploadLabel = document.getElementById('upload-label');
 
-fileInput.addEventListener('change', () => {
-  const f = fileInput.files[0];
-  if (f) {
-    uploadLabel.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)';
-    uploadArea.style.borderColor = '#4f6ef7';
-    uploadArea.style.background = '#f0f4ff';
-  }
-});
-
-uploadArea.addEventListener('dragover', e => {
-  e.preventDefault();
-  uploadArea.style.borderColor = '#4f6ef7';
-  uploadArea.style.background = '#f0f4ff';
-});
-uploadArea.addEventListener('dragleave', () => {
-  uploadArea.style.borderColor = '';
-  uploadArea.style.background = '';
-});
-uploadArea.addEventListener('drop', e => {
-  e.preventDefault();
-  const f = e.dataTransfer.files[0];
-  if (f) {
-    const dt = new DataTransfer();
-    dt.items.add(f);
-    fileInput.files = dt.files;
-    uploadLabel.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)';
-    uploadArea.style.borderColor = '#4f6ef7';
-    uploadArea.style.background = '#f0f4ff';
+  if (uploadArea && fileInput && uploadLabel) {
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files[0];
+      if (f) {
+        uploadLabel.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)';
+        uploadArea.style.borderColor = '#4f6ef7';
+        uploadArea.style.background = '#f0f4ff';
+      }
+    });
+    uploadArea.addEventListener('dragover', e => {
+      e.preventDefault();
+      uploadArea.style.borderColor = '#4f6ef7';
+      uploadArea.style.background = '#f0f4ff';
+    });
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.style.borderColor = '';
+      uploadArea.style.background = '';
+    });
+    uploadArea.addEventListener('drop', e => {
+      e.preventDefault();
+      const f = e.dataTransfer.files[0];
+      if (f) {
+        const dt = new DataTransfer();
+        dt.items.add(f);
+        fileInput.files = dt.files;
+        uploadLabel.textContent = f.name + ' (' + (f.size/1024/1024).toFixed(2) + ' MB)';
+        uploadArea.style.borderColor = '#4f6ef7';
+        uploadArea.style.background = '#f0f4ff';
+      }
+    });
   }
 });
 </script>
