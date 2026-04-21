@@ -281,6 +281,32 @@ def dashboard():
         Projection.date <= fim_30
     ).scalar() or 0
 
+    # Lançamentos PREVISTOS (status='previsto') — a receber / a pagar
+    lanc_prev_entradas = db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'entrada',
+        Transaction.status == 'previsto'
+    ).scalar() or 0
+    lanc_prev_saidas = db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'saida',
+        Transaction.status == 'previsto'
+    ).scalar() or 0
+    # Saldo projetado = realizado acumulado + previstos em aberto
+    saldo_projetado = float(saldo_total) + float(lanc_prev_entradas) - float(lanc_prev_saidas)
+
+    # Lançamentos previstos do mês atual (para contexto visual)
+    lanc_prev_ent_mes = db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'entrada',
+        Transaction.status == 'previsto',
+        Transaction.date >= inicio_mes,
+        Transaction.date <= fim_mes
+    ).scalar() or 0
+    lanc_prev_sai_mes = db.session.query(func.sum(Transaction.value)).filter(
+        Transaction.type == 'saida',
+        Transaction.status == 'previsto',
+        Transaction.date >= inicio_mes,
+        Transaction.date <= fim_mes
+    ).scalar() or 0
+
     # Gráfico pizza - saídas por categoria no mês
     pizza_saidas = db.session.query(
         Category.name, func.sum(Transaction.value).label('total')
@@ -325,6 +351,9 @@ def dashboard():
         lancamentos_recentes=lancamentos_recentes,
         contratos_ativos=contratos_ativos,
         prev_entradas=prev_entradas, prev_saidas=prev_saidas,
+        lanc_prev_entradas=lanc_prev_entradas, lanc_prev_saidas=lanc_prev_saidas,
+        lanc_prev_ent_mes=lanc_prev_ent_mes, lanc_prev_sai_mes=lanc_prev_sai_mes,
+        saldo_projetado=saldo_projetado,
         pizza_labels=json.dumps(pizza_labels),
         pizza_values=json.dumps(pizza_values),
         alerta_saldo=alerta_saldo,

@@ -77,6 +77,85 @@
   </div>
 </div>
 
+<!-- Lançamentos previstos (status='previsto') -->
+<div class="panel" style="margin-top:14px">
+  <div class="panel-header">
+    <h2 class="panel-title">Lançamentos Previstos (a receber / a pagar)</h2>
+    <span style="font-size:12px;color:var(--text-muted)">
+      Baseado nos lançamentos com status <strong>Previsto</strong>
+    </span>
+  </div>
+  <div class="panel-body" style="padding-top:8px">
+    <div class="cards-grid cards-grid-3">
+      <!-- Entradas previstas -->
+      <div class="card card-green">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1v22"></path><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+          </svg>
+        </div>
+        <div class="card-content">
+          <span class="card-label">A RECEBER (entradas previstas)</span>
+          <span class="card-value">{{ "R$ {:,.2f}".format(lanc_prev_entradas).replace(",","X").replace(".",",").replace("X",".") }}</span>
+          <span style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            Este mês: <strong style="color:#16803c">
+              {{ "R$ {:,.2f}".format(lanc_prev_ent_mes).replace(",","X").replace(".",",").replace("X",".") }}
+            </strong>
+          </span>
+        </div>
+      </div>
+
+      <!-- Saídas previstas -->
+      <div class="card card-red">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+            <line x1="2" y1="10" x2="22" y2="10"></line>
+          </svg>
+        </div>
+        <div class="card-content">
+          <span class="card-label">A PAGAR (saídas previstas)</span>
+          <span class="card-value">{{ "R$ {:,.2f}".format(lanc_prev_saidas).replace(",","X").replace(".",",").replace("X",".") }}</span>
+          <span style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            Este mês: <strong style="color:#dc2626">
+              {{ "R$ {:,.2f}".format(lanc_prev_sai_mes).replace(",","X").replace(".",",").replace("X",".") }}
+            </strong>
+          </span>
+        </div>
+      </div>
+
+      <!-- Saldo projetado -->
+      <div class="card {% if saldo_projetado >= 0 %}card-blue{% else %}card-orange{% endif %}">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+        </div>
+        <div class="card-content">
+          <span class="card-label">SALDO PROJETADO</span>
+          <span class="card-value">{{ "R$ {:,.2f}".format(saldo_projetado).replace(",","X").replace(".",",").replace("X",".") }}</span>
+          <span style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            Realizado + previstos em aberto
+          </span>
+        </div>
+      </div>
+    </div>
+
+    {% if lanc_prev_entradas > 0 or lanc_prev_saidas > 0 %}
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+      <a href="{{ url_for('lancamentos', status='previsto', tipo='entrada') }}"
+         class="btn btn-outline btn-xs" style="color:#16803c;border-color:#16803c">
+        Ver entradas previstas →
+      </a>
+      <a href="{{ url_for('lancamentos', status='previsto', tipo='saida') }}"
+         class="btn btn-outline btn-xs" style="color:#dc2626;border-color:#dc2626">
+        Ver saídas previstas →
+      </a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
 <!-- Alerta de saldo baixo -->
 {% if alerta_saldo %}
 <div class="alert-saldo-baixo">
