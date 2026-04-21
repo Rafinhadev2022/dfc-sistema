@@ -890,47 +890,120 @@ def projecoes_pdf():
                 pdf.cell(30, 6, f'{pct:.1f}%', border=1, align='C', ln=True)
             pdf.ln(3)
 
-        # ── LISTA DETALHADA ────────────────────────────────────────────────
-        pdf.add_page()
+        # ── LISTA DETALHADA (paisagem, tudo completo, sem truncar) ─────────
+        pdf.add_page(orientation='L')
+
+        # Larguras das colunas (paisagem A4 = 297mm, margem 10+10 = 277 uteis)
+        W_DATA, W_DESC, W_CAT, W_OBRA, W_TIPO, W_OBS, W_VAL = 22, 75, 35, 22, 15, 80, 28
+        COL_WIDTHS = [W_DATA, W_DESC, W_CAT, W_OBRA, W_TIPO, W_OBS, W_VAL]
+        LINE_H = 4.5  # altura por linha de texto dentro das celulas multi-linha
+
+        def draw_header():
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_fill_color(30, 64, 175)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(W_DATA, 7, 'Data',        fill=True, border=1, align='C')
+            pdf.cell(W_DESC, 7, 'Descricao',   fill=True, border=1)
+            pdf.cell(W_CAT,  7, 'Categoria',   fill=True, border=1)
+            pdf.cell(W_OBRA, 7, 'Obra',        fill=True, border=1, align='C')
+            pdf.cell(W_TIPO, 7, 'Tipo',        fill=True, border=1, align='C')
+            pdf.cell(W_OBS,  7, 'Observacoes', fill=True, border=1)
+            pdf.cell(W_VAL,  7, 'Valor',       fill=True, border=1, align='R', ln=True)
+            pdf.set_text_color(0, 0, 0)
+
         pdf.section_title('PROJECOES DETALHADAS')
-        pdf.set_font('Helvetica', 'B', 9)
-        pdf.set_fill_color(30, 64, 175)
-        pdf.set_text_color(255, 255, 255)
-        pdf.cell(22, 7, 'Data',       fill=True, border=1, align='C')
-        pdf.cell(70, 7, 'Descricao',  fill=True, border=1)
-        pdf.cell(40, 7, 'Categoria',  fill=True, border=1)
-        pdf.cell(28, 7, 'Obra',       fill=True, border=1)
-        pdf.cell(30, 7, 'Valor',      fill=True, border=1, align='R', ln=True)
-        pdf.set_text_color(0, 0, 0)
+        draw_header()
         pdf.set_font('Helvetica', '', 8.5)
+
         for idx, p in enumerate(projecoes):
-            if idx % 2 == 0:
-                pdf.set_fill_color(249, 250, 251)
-                fill = True
-            else:
-                fill = False
-            cat_nome = clean_txt(p.category.name)[:24] if p.category else '-'
-            obra     = clean_txt(p.contract.number)[:14] if p.contract else '-'
-            desc     = clean_txt(p.description)[:40]
-            pdf.cell(22, 6, p.date.strftime('%d/%m/%Y'), border=1, align='C', fill=fill)
-            pdf.cell(70, 6, desc,     border=1, fill=fill)
-            pdf.cell(40, 6, cat_nome, border=1, fill=fill)
-            pdf.cell(28, 6, obra,     border=1, fill=fill)
+            fill_bg = (249, 250, 251) if idx % 2 == 0 else (255, 255, 255)
+            fill    = idx % 2 == 0
+            cat_nome = clean_txt(p.category.name) if p.category else '-'
+            obra     = clean_txt(p.contract.number) if p.contract else '-'
+            desc     = clean_txt(p.description)
+            obs      = clean_txt(p.notes) if p.notes else '-'
+            tipo_txt = 'Entrada' if p.type == 'entrada' else 'Saida'
+
+            # Calcula quantas linhas ocupam descricao e observacoes
+            desc_lines = pdf.multi_cell(W_DESC, LINE_H, desc, dry_run=True, output="LINES")
+            obs_lines  = pdf.multi_cell(W_OBS,  LINE_H, obs,  dry_run=True, output="LINES")
+            n_lines = max(len(desc_lines), len(obs_lines), 1)
+            row_h = max(n_lines * LINE_H, 6)
+
+            # Quebra de pagina se nao couber
+            if pdf.get_y() + row_h > pdf.page_break_trigger:
+                pdf.add_page(orientation='L')
+                pdf.section_title('PROJECOES DETALHADAS (continuacao)')
+                draw_header()
+                pdf.set_font('Helvetica', '', 8.5)
+
+            x_start = pdf.get_x()
+            y_start = pdf.get_y()
+
+            # 1. Data (celula simples)
+            pdf.set_fill_color(*fill_bg)
+            pdf.cell(W_DATA, row_h, p.date.strftime('%d/%m/%Y'),
+                     border=1, align='C', fill=fill)
+
+            # 2. Descricao (multi_cell com altura dinamica)
+            x_desc = pdf.get_x()
+            pdf.multi_cell(W_DESC, LINE_H, desc, border=1, fill=fill,
+                           new_x="RIGHT", new_y="TOP", max_line_height=LINE_H)
+            # Se a descricao tem menos linhas que a altura da row, preencher o vazio com borda
+            h_desc_used = len(desc_lines) * LINE_H
+            if h_desc_used < row_h:
+                pdf.set_xy(x_desc, y_start + h_desc_used)
+                pdf.cell(W_DESC, row_h - h_desc_used, '', border='LR', fill=fill)
+                # Fechar borda inferior
+                pdf.set_draw_color(0, 0, 0)
+                pdf.line(x_desc, y_start + row_h, x_desc + W_DESC, y_start + row_h)
+            pdf.set_xy(x_desc + W_DESC, y_start)
+
+            # 3. Categoria
+            pdf.cell(W_CAT, row_h, cat_nome, border=1, fill=fill)
+
+            # 4. Obra
+            pdf.cell(W_OBRA, row_h, obra, border=1, align='C', fill=fill)
+
+            # 5. Tipo
+            pdf.cell(W_TIPO, row_h, tipo_txt, border=1, align='C', fill=fill)
+
+            # 6. Observacoes (multi_cell com altura dinamica)
+            x_obs = pdf.get_x()
+            pdf.multi_cell(W_OBS, LINE_H, obs, border=1, fill=fill,
+                           new_x="RIGHT", new_y="TOP", max_line_height=LINE_H)
+            h_obs_used = len(obs_lines) * LINE_H
+            if h_obs_used < row_h:
+                pdf.set_xy(x_obs, y_start + h_obs_used)
+                pdf.cell(W_OBS, row_h - h_obs_used, '', border='LR', fill=fill)
+                pdf.line(x_obs, y_start + row_h, x_obs + W_OBS, y_start + row_h)
+            pdf.set_xy(x_obs + W_OBS, y_start)
+
+            # 7. Valor (colorido)
             if p.type == 'entrada':
                 pdf.set_text_color(22, 101, 52)
                 sinal = '+'
             else:
                 pdf.set_text_color(153, 27, 27)
                 sinal = '-'
-            pdf.cell(30, 6, f'{sinal} {fmt_valor(p.value)}', border=1, align='R', fill=fill, ln=True)
+            pdf.set_font('Helvetica', 'B', 8.5)
+            pdf.cell(W_VAL, row_h, f'{sinal} {fmt_valor(p.value)}',
+                     border=1, align='R', fill=fill)
             pdf.set_text_color(0, 0, 0)
+            pdf.set_font('Helvetica', '', 8.5)
+
+            # Avancar para proxima linha
+            pdf.ln(row_h)
 
         # Totais finais
         pdf.set_font('Helvetica', 'B', 9.5)
         pdf.set_fill_color(30, 64, 175)
         pdf.set_text_color(255, 255, 255)
-        pdf.cell(160, 7, 'SALDO PROJETADO DO PERIODO', fill=True, border=1, align='R')
-        pdf.cell(30,  7, fmt_valor(total_entradas - total_saidas), fill=True, border=1, align='R', ln=True)
+        largura_total = sum(COL_WIDTHS)
+        pdf.cell(largura_total - W_VAL, 7, 'SALDO PROJETADO DO PERIODO',
+                 fill=True, border=1, align='R')
+        pdf.cell(W_VAL, 7, fmt_valor(total_entradas - total_saidas),
+                 fill=True, border=1, align='R', ln=True)
         pdf.set_text_color(0, 0, 0)
 
     pdf_bytes = pdf.output()
