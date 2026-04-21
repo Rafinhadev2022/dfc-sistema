@@ -143,6 +143,20 @@
 <div class="panel">
   <div class="panel-header">
     <h2 class="panel-title">Projeções Cadastradas</h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <a href="{{ url_for('projecoes_pdf', data_ini=filtros.data_ini, data_fim=filtros.data_fim, tipo='saida') }}"
+         class="btn btn-danger btn-sm" title="Projeções de pagamento (saídas)">
+        📄 PDF Pagamentos
+      </a>
+      <a href="{{ url_for('projecoes_pdf', data_ini=filtros.data_ini, data_fim=filtros.data_fim, tipo='entrada') }}"
+         class="btn btn-outline btn-sm" style="color:#16803c;border-color:#16803c" title="Projeções de recebimento (entradas)">
+        📄 PDF Recebimentos
+      </a>
+      <a href="{{ url_for('projecoes_pdf', data_ini=filtros.data_ini, data_fim=filtros.data_fim, tipo='') }}"
+         class="btn btn-primary btn-sm" title="Todas as projeções">
+        📄 PDF Completo
+      </a>
+    </div>
   </div>
   <div class="panel-body">
     {% if projecoes %}

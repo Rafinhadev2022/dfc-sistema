@@ -679,6 +679,269 @@ def projecao_realizar(id):
     flash('Projeção lançada como realizada!', 'success')
     return redirect(url_for('projecoes'))
 
+@app.route('/projecoes/pdf')
+@login_required
+def projecoes_pdf():
+    """Gera um PDF apenas com as projeções (pagamentos futuros planejados)."""
+    hoje = date.today()
+    data_ini_str = request.args.get('data_ini', hoje.strftime('%Y-%m-%d'))
+    data_fim_str = request.args.get('data_fim', (hoje + timedelta(days=90)).strftime('%Y-%m-%d'))
+    tipo = request.args.get('tipo', 'saida').strip()  # default: pagamentos
+
+    try:
+        inicio = datetime.strptime(data_ini_str, '%Y-%m-%d').date()
+        fim    = datetime.strptime(data_fim_str, '%Y-%m-%d').date()
+    except ValueError:
+        inicio = hoje
+        fim    = hoje + timedelta(days=90)
+
+    q = Projection.query.filter(Projection.date >= inicio, Projection.date <= fim)
+    if tipo in ('entrada', 'saida'):
+        q = q.filter(Projection.type == tipo)
+    projecoes = q.order_by(Projection.date.asc(), Projection.id.asc()).all()
+
+    # Saldo realizado atual
+    saldo_realizado = db.session.query(func.sum(
+        case((Transaction.type == 'entrada', Transaction.value), else_=-Transaction.value)
+    )).filter(Transaction.status == 'realizado').scalar() or 0
+    saldo_realizado = float(saldo_realizado)
+
+    # Totais
+    total_entradas = sum(float(p.value) for p in projecoes if p.type == 'entrada')
+    total_saidas   = sum(float(p.value) for p in projecoes if p.type == 'saida')
+    saldo_projetado_final = saldo_realizado + total_entradas - total_saidas
+
+    # Por categoria
+    cat_map = {}
+    for p in projecoes:
+        nome = p.category.name if p.category else 'Sem categoria'
+        key = (nome, p.type)
+        cat_map[key] = cat_map.get(key, 0) + float(p.value)
+    por_categoria = sorted(cat_map.items(), key=lambda x: x[1], reverse=True)
+
+    # Por mês (YYYY-MM)
+    mes_map = {}  # {(ano,mes): {'ent': x, 'sai': y}}
+    for p in projecoes:
+        k = (p.date.year, p.date.month)
+        mes_map.setdefault(k, {'ent': 0.0, 'sai': 0.0})
+        if p.type == 'entrada':
+            mes_map[k]['ent'] += float(p.value)
+        else:
+            mes_map[k]['sai'] += float(p.value)
+    por_mes = sorted(mes_map.items())
+
+    # ── PDF ────────────────────────────────────────────────────────────────
+    def fmt_valor(v):
+        return f'R$ {v:,.2f}'.replace(',', 'X').replace('.', ',').replace('X', '.')
+
+    def clean_txt(s):
+        if s is None:
+            return '-'
+        return (str(s)
+                .replace('\u2014', '-').replace('\u2013', '-')
+                .replace('\u2018', "'").replace('\u2019', "'")
+                .replace('\u201c', '"').replace('\u201d', '"')
+                .replace('\u2022', '*').replace('\u2026', '...')
+                .replace('\u00a0', ' '))
+
+    LOGO_PATH = os.path.join(app.root_path, 'static', 'img', 'logo-ns.png')
+    periodo_label = f'{inicio.strftime("%d/%m/%Y")} a {fim.strftime("%d/%m/%Y")}'
+    emissao_label = datetime.now().strftime('%d/%m/%Y as %H:%M')
+    if tipo == 'saida':
+        subtitulo = 'PROJECOES DE PAGAMENTO'
+    elif tipo == 'entrada':
+        subtitulo = 'PROJECOES DE RECEBIMENTO'
+    else:
+        subtitulo = 'PROJECOES DE CAIXA'
+
+    class ProjPdf(FPDF):
+        def header(self):
+            has_logo = os.path.exists(LOGO_PATH)
+            self.set_fill_color(255, 255, 255)
+            self.rect(0, 0, 210, 30, 'F')
+            if has_logo:
+                try:
+                    self.image(LOGO_PATH, x=10, y=4, h=22)
+                except Exception:
+                    has_logo = False
+            self.set_text_color(30, 64, 175)
+            self.set_font('Helvetica', 'B', 14)
+            self.set_xy(60, 7)
+            self.cell(90, 7, subtitulo, align='C')
+            self.set_text_color(80, 80, 80)
+            self.set_font('Helvetica', '', 9)
+            self.set_xy(60, 15)
+            if not has_logo:
+                self.cell(90, 5, 'NUNES & SANTOS LTDA', align='C')
+                self.set_xy(60, 20)
+            self.cell(90, 5, 'CNPJ: 22.892.910/0001-69', align='C')
+            self.set_text_color(60, 60, 60)
+            self.set_font('Helvetica', '', 8.5)
+            self.set_xy(150, 8)
+            self.cell(55, 4, f'Periodo: {periodo_label}', align='R')
+            self.set_xy(150, 13)
+            self.cell(55, 4, f'Emitido: {emissao_label}', align='R')
+            self.set_draw_color(30, 64, 175)
+            self.set_line_width(0.8)
+            self.line(10, 30, 200, 30)
+            self.set_line_width(0.2)
+            self.set_text_color(0, 0, 0)
+            self.set_y(34)
+
+        def footer(self):
+            self.set_y(-12)
+            self.set_font('Helvetica', 'I', 8)
+            self.set_text_color(120, 120, 120)
+            self.cell(95, 5, 'Nunes & Santos LTDA - Sistema DFC', align='L')
+            self.cell(95, 5, f'Pagina {self.page_no()}/{{nb}}', align='R')
+
+        def section_title(self, titulo):
+            self.set_font('Helvetica', 'B', 12)
+            self.set_fill_color(30, 64, 175)
+            self.set_text_color(255, 255, 255)
+            self.cell(190, 7, f'  {titulo}', fill=True, ln=True)
+            self.set_text_color(0, 0, 0)
+            self.ln(1)
+
+        def kv_row(self, label, valor, cor=(243, 244, 246), bold_valor=False, cor_valor=(0,0,0)):
+            self.set_fill_color(*cor)
+            self.set_font('Helvetica', '', 10)
+            self.cell(95, 7, label, fill=True, border=1)
+            self.set_font('Helvetica', 'B' if bold_valor else '', 10)
+            self.set_text_color(*cor_valor)
+            self.cell(95, 7, valor, fill=True, border=1, align='R', ln=True)
+            self.set_text_color(0, 0, 0)
+
+    pdf = ProjPdf()
+    pdf.alias_nb_pages()
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
+    # ── RESUMO ─────────────────────────────────────────────────────────────
+    pdf.section_title('RESUMO DO PERIODO')
+    pdf.kv_row('Saldo realizado atual (todos os periodos)', fmt_valor(saldo_realizado),
+               cor=(239, 246, 255),
+               cor_valor=(22,101,52) if saldo_realizado >= 0 else (153,27,27),
+               bold_valor=True)
+    if tipo in ('', 'todos') or tipo == 'entrada':
+        pdf.kv_row('Total de ENTRADAS previstas', fmt_valor(total_entradas),
+                   cor=(240, 253, 244), cor_valor=(22,101,52), bold_valor=True)
+    if tipo in ('', 'todos') or tipo == 'saida':
+        pdf.kv_row('Total de SAIDAS (pagamentos) previstas', fmt_valor(total_saidas),
+                   cor=(254, 242, 242), cor_valor=(153,27,27), bold_valor=True)
+    pdf.kv_row('Saldo projetado ao final do periodo', fmt_valor(saldo_projetado_final),
+               cor=(254, 249, 195),
+               cor_valor=(22,101,52) if saldo_projetado_final >= 0 else (153,27,27),
+               bold_valor=True)
+    pdf.kv_row('Qtd. de projecoes no periodo', str(len(projecoes)),
+               cor=(243, 244, 246))
+    pdf.ln(4)
+
+    if not projecoes:
+        pdf.set_font('Helvetica', 'I', 10)
+        pdf.set_text_color(120, 120, 120)
+        pdf.cell(190, 10, 'Nenhuma projecao cadastrada no periodo informado.', align='C', ln=True)
+        pdf.set_text_color(0, 0, 0)
+    else:
+        # ── POR MÊS ────────────────────────────────────────────────────────
+        if por_mes and len(por_mes) > 1:
+            pdf.section_title('DISTRIBUICAO MENSAL')
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_fill_color(224, 231, 255)
+            pdf.cell(40, 7, 'Mes/Ano',    fill=True, border=1, align='C')
+            pdf.cell(50, 7, 'Entradas',   fill=True, border=1, align='R')
+            pdf.cell(50, 7, 'Saidas',     fill=True, border=1, align='R')
+            pdf.cell(50, 7, 'Liquido',    fill=True, border=1, align='R', ln=True)
+            pdf.set_font('Helvetica', '', 9)
+            meses_nome = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez']
+            for (ano_k, mes_k), vals in por_mes:
+                liquido = vals['ent'] - vals['sai']
+                pdf.cell(40, 6, f'{meses_nome[mes_k-1]}/{ano_k}', border=1, align='C')
+                pdf.cell(50, 6, fmt_valor(vals['ent']), border=1, align='R')
+                pdf.cell(50, 6, fmt_valor(vals['sai']), border=1, align='R')
+                pdf.set_text_color(*((22,101,52) if liquido >= 0 else (153,27,27)))
+                pdf.cell(50, 6, fmt_valor(liquido), border=1, align='R', ln=True)
+                pdf.set_text_color(0, 0, 0)
+            pdf.ln(3)
+
+        # ── POR CATEGORIA ──────────────────────────────────────────────────
+        if por_categoria:
+            if pdf.get_y() > 230:
+                pdf.add_page()
+            pdf.section_title('POR CATEGORIA')
+            pdf.set_font('Helvetica', 'B', 9)
+            pdf.set_fill_color(224, 231, 255)
+            pdf.cell(100, 7, 'Categoria', fill=True, border=1)
+            pdf.cell(30,  7, 'Tipo',      fill=True, border=1, align='C')
+            pdf.cell(30,  7, 'Valor',     fill=True, border=1, align='R')
+            pdf.cell(30,  7, '% do Tipo', fill=True, border=1, align='C', ln=True)
+            pdf.set_font('Helvetica', '', 9)
+            for (nome, t_tipo), total in por_categoria:
+                base = total_entradas if t_tipo == 'entrada' else total_saidas
+                pct = (total / base * 100) if base else 0
+                pdf.cell(100, 6, clean_txt(nome)[:55], border=1)
+                pdf.cell(30,  6, 'Entrada' if t_tipo == 'entrada' else 'Saida', border=1, align='C')
+                if t_tipo == 'entrada':
+                    pdf.set_text_color(22, 101, 52)
+                else:
+                    pdf.set_text_color(153, 27, 27)
+                pdf.cell(30, 6, fmt_valor(total), border=1, align='R')
+                pdf.set_text_color(0, 0, 0)
+                pdf.cell(30, 6, f'{pct:.1f}%', border=1, align='C', ln=True)
+            pdf.ln(3)
+
+        # ── LISTA DETALHADA ────────────────────────────────────────────────
+        pdf.add_page()
+        pdf.section_title('PROJECOES DETALHADAS')
+        pdf.set_font('Helvetica', 'B', 9)
+        pdf.set_fill_color(30, 64, 175)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(22, 7, 'Data',       fill=True, border=1, align='C')
+        pdf.cell(70, 7, 'Descricao',  fill=True, border=1)
+        pdf.cell(40, 7, 'Categoria',  fill=True, border=1)
+        pdf.cell(28, 7, 'Obra',       fill=True, border=1)
+        pdf.cell(30, 7, 'Valor',      fill=True, border=1, align='R', ln=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Helvetica', '', 8.5)
+        for idx, p in enumerate(projecoes):
+            if idx % 2 == 0:
+                pdf.set_fill_color(249, 250, 251)
+                fill = True
+            else:
+                fill = False
+            cat_nome = clean_txt(p.category.name)[:24] if p.category else '-'
+            obra     = clean_txt(p.contract.number)[:14] if p.contract else '-'
+            desc     = clean_txt(p.description)[:40]
+            pdf.cell(22, 6, p.date.strftime('%d/%m/%Y'), border=1, align='C', fill=fill)
+            pdf.cell(70, 6, desc,     border=1, fill=fill)
+            pdf.cell(40, 6, cat_nome, border=1, fill=fill)
+            pdf.cell(28, 6, obra,     border=1, fill=fill)
+            if p.type == 'entrada':
+                pdf.set_text_color(22, 101, 52)
+                sinal = '+'
+            else:
+                pdf.set_text_color(153, 27, 27)
+                sinal = '-'
+            pdf.cell(30, 6, f'{sinal} {fmt_valor(p.value)}', border=1, align='R', fill=fill, ln=True)
+            pdf.set_text_color(0, 0, 0)
+
+        # Totais finais
+        pdf.set_font('Helvetica', 'B', 9.5)
+        pdf.set_fill_color(30, 64, 175)
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(160, 7, 'SALDO PROJETADO DO PERIODO', fill=True, border=1, align='R')
+        pdf.cell(30,  7, fmt_valor(total_entradas - total_saidas), fill=True, border=1, align='R', ln=True)
+        pdf.set_text_color(0, 0, 0)
+
+    pdf_bytes = pdf.output()
+    response = make_response(bytes(pdf_bytes))
+    response.headers['Content-Type'] = 'application/pdf'
+    sufixo = 'pagamentos' if tipo == 'saida' else ('recebimentos' if tipo == 'entrada' else 'caixa')
+    response.headers['Content-Disposition'] = (
+        f'attachment; filename=Projecoes_{sufixo}_{inicio.strftime("%Y-%m-%d")}_a_{fim.strftime("%Y-%m-%d")}.pdf'
+    )
+    return response
+
 # ─── RELATÓRIOS ───────────────────────────────────────────────────────────────
 
 @app.route('/relatorios')
