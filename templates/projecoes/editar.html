@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Editar Projeção{% endblock %}
+{% block page_title %}Editar Projeção{% endblock %}
+
+{% block content %}
+<div class="panel panel-narrow">
+  <div class="panel-header">
+    <h2 class="panel-title">Editar Projeção</h2>
+    <a href="{{ url_for('projecoes') }}" class="btn btn-outline btn-sm">← Voltar</a>
+  </div>
+  <div class="panel-body">
+    <form method="POST">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Tipo <span class="required">*</span></label>
+          <select name="type" id="tipo-proj" class="form-control" required onchange="filtrarCatProj(this.value)">
+            <option value="entrada" {% if projecao.type == 'entrada' %}selected{% endif %}>Entrada</option>
+            <option value="saida"   {% if projecao.type == 'saida'   %}selected{% endif %}>Saída</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Data <span class="required">*</span></label>
+          <input type="date" name="date" class="form-control" required
+                 value="{{ projecao.date.strftime('%Y-%m-%d') }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Descrição <span class="required">*</span></label>
+        <input type="text" name="description" class="form-control" required maxlength="255"
+               value="{{ projecao.description }}">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Categoria <span class="required">*</span></label>
+          <select name="category_id" id="cat-proj" class="form-control" required>
+            <option value="">Selecione...</option>
+            {% for c in categorias %}
+            <option value="{{ c.id }}" data-type="{{ c.type }}"
+              {% if projecao.category_id == c.id %}selected{% endif %}>
+              {{ c.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Valor (R$) <span class="required">*</span></label>
+          <input type="text" name="value" id="valor-proj" class="form-control money-input" required
+                 value="{{ '{:,.2f}'.format(projecao.value).replace(',','X').replace('.',',').replace('X','.') }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Contrato</label>
+        <select name="contract_id" class="form-control">
+          <option value="">Nenhum</option>
+          {% for c in contratos %}
+          <option value="{{ c.id }}" {% if projecao.contract_id == c.id %}selected{% endif %}>
+            {{ c.number }} — {{ c.client }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="notes" class="form-control" rows="3">{{ projecao.notes or '' }}</textarea>
+      </div>
+
+      <div class="form-actions">
+        <a href="{{ url_for('projecoes') }}" class="btn btn-outline">Cancelar</a>
+        <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  // Filtra categorias pelo tipo selecionado (mesma logica da pagina de projecoes)
+  function filtrarCatProj(tipo) {
+    const sel = document.getElementById('cat-proj');
+    const atual = sel.value;
+    Array.from(sel.options).forEach(opt => {
+      if (!opt.value) { opt.hidden = false; return; }
+      opt.hidden = opt.dataset.type && opt.dataset.type !== tipo;
+    });
+    // se a atual ficar escondida, mantem selecao? (mantem para nao perder dado ao editar)
+    const selectedOpt = sel.options[sel.selectedIndex];
+    if (selectedOpt && selectedOpt.hidden) {
+      // nao muda, apenas deixa o usuario ciente
+    }
+  }
+  // aplica filtro inicial
+  document.addEventListener('DOMContentLoaded', () => {
+    filtrarCatProj(document.getElementById('tipo-proj').value);
+  });
+</script>
+{% endblock %}

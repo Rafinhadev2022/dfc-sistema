@@ -195,6 +195,7 @@
                 onsubmit="return confirm('Lançar esta projeção como realizada?')">
                 <button type="submit" class="btn btn-primary btn-xs">✓ Realizar</button>
               </form>
+              <a href="{{ url_for('projecao_editar', id=p.id) }}" class="btn btn-outline btn-xs">Editar</a>
               <form method="POST" action="{{ url_for('projecao_excluir', id=p.id) }}" style="display:inline"
                 onsubmit="return confirm('Excluir esta projeção?')">
                 <button type="submit" class="btn btn-danger btn-xs">Excluir</button>

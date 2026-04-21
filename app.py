@@ -649,6 +649,31 @@ def projecao_nova():
         flash(f'Erro ao salvar: {str(e)}', 'danger')
     return redirect(url_for('projecoes'))
 
+@app.route('/projecoes/<int:id>/editar', methods=['GET', 'POST'])
+@login_required
+def projecao_editar(id):
+    p = Projection.query.get_or_404(id)
+    if request.method == 'POST':
+        try:
+            valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
+            p.date        = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
+            p.description = request.form['description'].strip()
+            p.category_id = int(request.form['category_id'])
+            p.contract_id = int(request.form['contract_id']) if request.form.get('contract_id') else None
+            p.value       = float(valor_str)
+            p.type        = request.form['type']
+            p.notes       = request.form.get('notes', '').strip()
+            db.session.commit()
+            flash('Projeção atualizada com sucesso!', 'success')
+            return redirect(url_for('projecoes'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Erro ao salvar: {str(e)}', 'danger')
+    categorias = Category.query.filter_by(active=True).order_by(Category.name).all()
+    contratos  = Contract.query.filter_by(status='ativo').order_by(Contract.number).all()
+    return render_template('projecoes/editar.html',
+                           projecao=p, categorias=categorias, contratos=contratos)
+
 @app.route('/projecoes/<int:id>/excluir', methods=['POST'])
 @login_required
 def projecao_excluir(id):
