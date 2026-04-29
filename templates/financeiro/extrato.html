@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Extrato — {{ conta.name }}{% endblock %}
+{% block page_title %}Extrato — {{ conta.name }}{% endblock %}
+
+{% macro brl(v) -%}
+  R$ {{ "{:,.2f}".format(v).replace(",","X").replace(".",",").replace("X",".") }}
+{%- endmacro %}
+
+{% block content %}
+
+<div class="cards-grid cards-grid-3">
+  <div class="card card-blue">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"></rect></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Conta</span>
+      <span class="card-value" style="font-size:18px">
+        <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:{{ conta.color or '#4f6ef7' }};margin-right:6px"></span>
+        {{ conta.name }}
+      </span>
+      <span style="font-size:11.5px;color:#6b7280">
+        {{ conta.bank or '—' }}
+        {% if conta.agency %} · Ag. {{ conta.agency }}{% endif %}
+        {% if conta.account_number %} · CC {{ conta.account_number }}{% endif %}
+      </span>
+    </div>
+  </div>
+  <div class="card card-gray">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saldo Inicial</span>
+      <span class="card-value">{{ brl(conta.initial_balance or 0) }}</span>
+      <span style="font-size:11.5px;color:#6b7280">
+        {% if conta.opening_date %}em {{ conta.opening_date.strftime('%d/%m/%Y') }}{% else %}—{% endif %}
+      </span>
+    </div>
+  </div>
+  <div class="card {% if saldo_atual >= 0 %}card-green{% else %}card-red{% endif %}">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saldo Atual</span>
+      <span class="card-value {% if saldo_atual >= 0 %}text-green{% else %}text-red{% endif %}">{{ brl(saldo_atual) }}</span>
+      <span style="font-size:11.5px;color:#6b7280">Apenas lançamentos realizados</span>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Filtrar período</h2>
+    <a href="{{ url_for('contas_bancarias') }}" class="btn btn-outline btn-sm">← Voltar</a>
+  </div>
+  <div class="panel-body">
+    <form method="GET">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Data Inicial</label>
+          <input type="date" name="data_ini" class="form-control" value="{{ filtros.data_ini }}">
+        </div>
+        <div class="form-group">
+          <label>Data Final</label>
+          <input type="date" name="data_fim" class="form-control" value="{{ filtros.data_fim }}">
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-end;gap:6px">
+          <button type="submit" class="btn btn-primary">Filtrar</button>
+          <a href="{{ url_for('conta_bancaria_extrato', id=conta.id) }}" class="btn btn-outline">Limpar</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Movimentação</h2>
+  </div>
+  <div class="panel-body">
+    {% if linhas %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Status</th>
+            <th class="text-right">Entrada</th>
+            <th class="text-right">Saída</th>
+            <th class="text-right">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in linhas %}
+          <tr {% if l.t.status == 'previsto' %}style="opacity:0.65"{% endif %}>
+            <td class="nowrap">{{ l.t.date.strftime('%d/%m/%Y') }}</td>
+            <td>{{ l.t.description }}</td>
+            <td><span class="badge badge-gray">{{ l.t.category.name if l.t.category else '-' }}</span></td>
+            <td>
+              {% if l.t.status == 'realizado' %}
+                <span class="badge badge-green">Realizado</span>
+              {% else %}
+                <span class="badge badge-gray">Previsto</span>
+              {% endif %}
+            </td>
+            <td class="text-right text-green nowrap">
+              {% if l.t.type == 'entrada' %}{{ brl(l.t.value) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-right text-red nowrap">
+              {% if l.t.type == 'saida' %}{{ brl(l.t.value) }}{% else %}—{% endif %}
+            </td>
+            <td class="text-right font-bold {% if l.saldo_apos >= 0 %}text-green{% else %}text-red{% endif %} nowrap">
+              {{ brl(l.saldo_apos) }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <p>Nenhuma movimentação para o período selecionado.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

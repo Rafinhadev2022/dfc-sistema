@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Recebimentos{% endblock %}
+{% block page_title %}Recebimentos (Entradas){% endblock %}
+
+{% macro brl(v) -%}
+  R$ {{ "{:,.2f}".format(v).replace(",","X").replace(".",",").replace("X",".") }}
+{%- endmacro %}
+
+{% block content %}
+
+<!-- Resumo -->
+<div class="cards-grid cards-grid-2">
+  <div class="card card-green">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Recebimentos Realizados (no filtro)</span>
+      <span class="card-value">{{ brl(filtros.total_realizado) }}</span>
+    </div>
+  </div>
+  <div class="card card-gray">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">A Receber (Previstos)</span>
+      <span class="card-value text-green">{{ brl(filtros.total_previsto) }}</span>
+    </div>
+  </div>
+</div>
+
+<!-- Filtros -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Filtros</h2>
+    {% if current_user.can_edit() %}
+    <a href="{{ url_for('lancamento_novo') }}?tipo=entrada" class="btn btn-primary btn-sm">+ Novo Recebimento</a>
+    {% endif %}
+  </div>
+  <div class="panel-body">
+    <form method="GET">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Data Inicial</label>
+          <input type="date" name="data_ini" class="form-control" value="{{ filtros.data_ini }}">
+        </div>
+        <div class="form-group">
+          <label>Data Final</label>
+          <input type="date" name="data_fim" class="form-control" value="{{ filtros.data_fim }}">
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select name="status" class="form-control">
+            <option value="">Todos</option>
+            <option value="realizado" {% if filtros.status == 'realizado' %}selected{% endif %}>Realizado</option>
+            <option value="previsto"  {% if filtros.status == 'previsto'  %}selected{% endif %}>Previsto</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Categoria</label>
+          <select name="categoria_id" class="form-control">
+            <option value="">Todas</option>
+            {% for c in categorias %}
+            <option value="{{ c.id }}" {% if filtros.categoria_id == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Conta Bancária</label>
+          <select name="conta_id" class="form-control">
+            <option value="">Todas</option>
+            {% for c in contas %}
+            <option value="{{ c.id }}" {% if filtros.conta_id == c.id|string %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-end;gap:6px">
+          <button type="submit" class="btn btn-primary">Filtrar</button>
+          <a href="{{ url_for('recebimentos') }}" class="btn btn-outline">Limpar</a>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Lista -->
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Recebimentos</h2>
+  </div>
+  <div class="panel-body">
+    {% if lancamentos.items %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Descrição</th>
+            <th>Categoria</th>
+            <th>Conta</th>
+            <th>Contrato</th>
+            <th>Status</th>
+            <th class="text-right">Valor</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in lancamentos.items %}
+          <tr>
+            <td class="nowrap">{{ t.date.strftime('%d/%m/%Y') }}</td>
+            <td>{{ t.description }}</td>
+            <td><span class="badge badge-gray">{{ t.category.name if t.category else '-' }}</span></td>
+            <td class="text-sm text-gray">{{ t.bank_account.name if t.bank_account else '—' }}</td>
+            <td class="text-sm text-gray">{{ t.contract.number if t.contract else '-' }}</td>
+            <td>
+              {% if t.status == 'realizado' %}
+                <span class="badge badge-green">Realizado</span>
+              {% else %}
+                <span class="badge badge-gray">Previsto</span>
+              {% endif %}
+            </td>
+            <td class="text-right font-bold text-green nowrap">{{ brl(t.value) }}</td>
+            <td class="text-center nowrap">
+              <a href="{{ url_for('lancamento_editar', id=t.id) }}" class="btn btn-outline btn-xs">Editar</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if lancamentos.pages > 1 %}
+    <div style="display:flex;justify-content:center;gap:6px;margin-top:14px">
+      {% if lancamentos.has_prev %}
+      <a href="{{ url_for('recebimentos', page=lancamentos.prev_num, status=filtros.status, data_ini=filtros.data_ini, data_fim=filtros.data_fim, categoria_id=filtros.categoria_id, conta_id=filtros.conta_id) }}" class="btn btn-outline btn-sm">← Anterior</a>
+      {% endif %}
+      <span style="padding:6px 12px;font-size:13px;color:#6b7280">Página {{ lancamentos.page }} de {{ lancamentos.pages }}</span>
+      {% if lancamentos.has_next %}
+      <a href="{{ url_for('recebimentos', page=lancamentos.next_num, status=filtros.status, data_ini=filtros.data_ini, data_fim=filtros.data_fim, categoria_id=filtros.categoria_id, conta_id=filtros.conta_id) }}" class="btn btn-outline btn-sm">Próxima →</a>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline></svg>
+      <p>Nenhum recebimento encontrado para os filtros aplicados.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

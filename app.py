@@ -1,6 +1,6 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
-from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder, BankStatementEntry, Employee, Supplier
+from models import db, User, Category, Transaction, Contract, Projection, PasswordResetToken, CostCenter, BillReminder, BankStatementEntry, Employee, Supplier, BankAccount
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
@@ -95,6 +95,10 @@ def run_migrations():
     add_col('transactions', 'bank_reference',      'VARCHAR(120)')
     add_col('transactions', 'employee_id',         'INTEGER')
     add_col('transactions', 'supplier_id',         'INTEGER')
+    add_col('transactions', 'bank_account_id',     'INTEGER')
+
+    # projections
+    add_col('projections', 'bank_account_id',      'INTEGER')
 
     # bill_reminders
     add_col('bill_reminders', 'attachment_data',     blob_type)
@@ -406,6 +410,8 @@ def lancamento_novo():
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     funcionarios = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
     fornecedores_lista = Supplier.query.filter_by(status='ativo').order_by(Supplier.name).all()
+    contas = BankAccount.query.filter_by(status='ativo').order_by(BankAccount.name).all()
+    tipo_pre = request.args.get('tipo', '')  # ?tipo=entrada/saida pre-seleciona tipo
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -417,6 +423,7 @@ def lancamento_novo():
                 cost_center_id=int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None,
                 employee_id=int(request.form['employee_id']) if request.form.get('employee_id') else None,
                 supplier_id=int(request.form['supplier_id']) if request.form.get('supplier_id') else None,
+                bank_account_id=int(request.form['bank_account_id']) if request.form.get('bank_account_id') else None,
                 value=float(valor_str),
                 type=request.form['type'],
                 status=request.form['status'],
@@ -429,7 +436,9 @@ def lancamento_novo():
                     flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
                     return render_template('lancamentos/form.html', lancamento=None,
                                            categorias=categorias, contratos=contratos,
-                                           centros=centros, hoje=date.today())
+                                           centros=centros, funcionarios=funcionarios,
+                                           fornecedores=fornecedores_lista, contas=contas,
+                                           tipo_pre=tipo_pre, hoje=date.today())
                 t.attachment_data = arquivo.read()
                 t.attachment_original = arquivo.filename
                 t.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
@@ -442,7 +451,8 @@ def lancamento_novo():
             flash(f'Erro ao salvar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=None, categorias=categorias,
                            contratos=contratos, centros=centros, funcionarios=funcionarios,
-                           fornecedores=fornecedores_lista, hoje=date.today())
+                           fornecedores=fornecedores_lista, contas=contas,
+                           tipo_pre=tipo_pre, hoje=date.today())
 
 @app.route('/lancamentos/<int:id>/editar', methods=['GET', 'POST'])
 @login_required
@@ -453,6 +463,7 @@ def lancamento_editar(id):
     centros = CostCenter.query.filter_by(status='ativo').order_by(CostCenter.name).all()
     funcionarios = Employee.query.filter_by(status='ativo').order_by(Employee.name).all()
     fornecedores_lista = Supplier.query.filter_by(status='ativo').order_by(Supplier.name).all()
+    contas = BankAccount.query.filter_by(status='ativo').order_by(BankAccount.name).all()
     if request.method == 'POST':
         try:
             valor_str = request.form.get('value', '0').replace('.', '').replace(',', '.')
@@ -463,6 +474,7 @@ def lancamento_editar(id):
             t.cost_center_id = int(request.form['cost_center_id']) if request.form.get('cost_center_id') else None
             t.employee_id = int(request.form['employee_id']) if request.form.get('employee_id') else None
             t.supplier_id = int(request.form['supplier_id']) if request.form.get('supplier_id') else None
+            t.bank_account_id = int(request.form['bank_account_id']) if request.form.get('bank_account_id') else None
             t.value = float(valor_str)
             t.type = request.form['type']
             t.status = request.form['status']
@@ -472,7 +484,9 @@ def lancamento_editar(id):
                 if not allowed_file(arquivo.filename):
                     flash('Formato de arquivo não permitido. Use PDF, JPG, PNG ou GIF.', 'danger')
                     return render_template('lancamentos/form.html', lancamento=t,
-                                           categorias=categorias, contratos=contratos, centros=centros)
+                                           categorias=categorias, contratos=contratos, centros=centros,
+                                           funcionarios=funcionarios, fornecedores=fornecedores_lista,
+                                           contas=contas)
                 t.attachment_data = arquivo.read()
                 t.attachment_original = arquivo.filename
                 t.attachment_mimetype = arquivo.mimetype or mimetypes.guess_type(arquivo.filename)[0] or 'application/octet-stream'
@@ -484,7 +498,7 @@ def lancamento_editar(id):
             flash(f'Erro ao atualizar: {str(e)}', 'danger')
     return render_template('lancamentos/form.html', lancamento=t, categorias=categorias,
                            contratos=contratos, centros=centros, funcionarios=funcionarios,
-                           fornecedores=fornecedores_lista)
+                           fornecedores=fornecedores_lista, contas=contas)
 
 @app.route('/lancamentos/<int:id>/anexo')
 @login_required
@@ -1068,6 +1082,261 @@ def projecoes_pdf():
         f'attachment; filename=Projecoes_{sufixo}_{inicio.strftime("%Y-%m-%d")}_a_{fim.strftime("%Y-%m-%d")}.pdf'
     )
     return response
+
+# ─── FINANCEIRO (Pagamentos / Recebimentos / Contas Bancárias) ──────────────
+
+def _saldo_conta(conta):
+    """Saldo realizado da conta = saldo inicial + entradas realizadas - saidas realizadas."""
+    entradas = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(Transaction.bank_account_id == conta.id,
+                Transaction.type == 'entrada',
+                Transaction.status == 'realizado').scalar() or 0
+    saidas = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(Transaction.bank_account_id == conta.id,
+                Transaction.type == 'saida',
+                Transaction.status == 'realizado').scalar() or 0
+    return float(conta.initial_balance or 0) + float(entradas) - float(saidas)
+
+
+@app.route('/financeiro')
+@login_required
+def financeiro():
+    contas = BankAccount.query.filter_by(status='ativo').order_by(BankAccount.name).all()
+    saldos = {c.id: _saldo_conta(c) for c in contas}
+    saldo_total = sum(saldos.values())
+
+    hoje = date.today()
+    inicio_mes = hoje.replace(day=1)
+
+    entradas_mes = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(Transaction.type == 'entrada',
+                Transaction.status == 'realizado',
+                Transaction.date >= inicio_mes,
+                Transaction.date <= hoje).scalar() or 0
+    saidas_mes = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(Transaction.type == 'saida',
+                Transaction.status == 'realizado',
+                Transaction.date >= inicio_mes,
+                Transaction.date <= hoje).scalar() or 0
+
+    a_pagar = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(Transaction.type == 'saida',
+                Transaction.status == 'previsto').scalar() or 0
+    a_receber = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(Transaction.type == 'entrada',
+                Transaction.status == 'previsto').scalar() or 0
+
+    ultimos = Transaction.query.order_by(Transaction.date.desc(),
+                                         Transaction.created_at.desc()).limit(8).all()
+
+    return render_template('financeiro/index.html',
+                           contas=contas, saldos=saldos, saldo_total=saldo_total,
+                           entradas_mes=float(entradas_mes), saidas_mes=float(saidas_mes),
+                           a_pagar=float(a_pagar), a_receber=float(a_receber),
+                           ultimos=ultimos)
+
+
+def _listar_lancamentos_tipo(tipo):
+    """Helper para listas de Pagamentos (saida) e Recebimentos (entrada)."""
+    page = request.args.get('page', 1, type=int)
+    status = request.args.get('status', '')
+    data_ini = request.args.get('data_ini', '')
+    data_fim = request.args.get('data_fim', '')
+    categoria_id = request.args.get('categoria_id', '', type=str)
+    conta_id = request.args.get('conta_id', '', type=str)
+
+    # Filtros base (sem status — usados nos totais agregados)
+    base_filters = [Transaction.type == tipo]
+    if data_ini:
+        base_filters.append(Transaction.date >= datetime.strptime(data_ini, '%Y-%m-%d').date())
+    if data_fim:
+        base_filters.append(Transaction.date <= datetime.strptime(data_fim, '%Y-%m-%d').date())
+    if categoria_id:
+        base_filters.append(Transaction.category_id == int(categoria_id))
+    if conta_id:
+        base_filters.append(Transaction.bank_account_id == int(conta_id))
+
+    # Filtros completos (com status) para a lista paginada
+    list_filters = list(base_filters)
+    if status:
+        list_filters.append(Transaction.status == status)
+
+    paginados = Transaction.query.filter(*list_filters)\
+        .order_by(Transaction.date.desc(), Transaction.created_at.desc())\
+        .paginate(page=page, per_page=20)
+
+    total_realizado = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(*base_filters, Transaction.status == 'realizado').scalar() or 0
+    total_previsto = db.session.query(func.coalesce(func.sum(Transaction.value), 0))\
+        .filter(*base_filters, Transaction.status == 'previsto').scalar() or 0
+
+    categorias = Category.query.filter_by(active=True, type=tipo).order_by(Category.name).all()
+    contas = BankAccount.query.filter_by(status='ativo').order_by(BankAccount.name).all()
+
+    return paginados, categorias, contas, {
+        'status': status, 'data_ini': data_ini, 'data_fim': data_fim,
+        'categoria_id': categoria_id, 'conta_id': conta_id,
+        'total_realizado': float(total_realizado),
+        'total_previsto': float(total_previsto),
+    }
+
+
+@app.route('/financeiro/pagamentos')
+@login_required
+def pagamentos():
+    paginados, categorias, contas, ctx = _listar_lancamentos_tipo('saida')
+    return render_template('financeiro/pagamentos.html',
+                           lancamentos=paginados, categorias=categorias,
+                           contas=contas, filtros=ctx)
+
+
+@app.route('/financeiro/recebimentos')
+@login_required
+def recebimentos():
+    paginados, categorias, contas, ctx = _listar_lancamentos_tipo('entrada')
+    return render_template('financeiro/recebimentos.html',
+                           lancamentos=paginados, categorias=categorias,
+                           contas=contas, filtros=ctx)
+
+
+# ─── CONTAS BANCÁRIAS ───────────────────────────────────────────────────────
+
+@app.route('/financeiro/contas')
+@login_required
+def contas_bancarias():
+    contas = BankAccount.query.order_by(BankAccount.status.desc(), BankAccount.name).all()
+    saldos = {c.id: _saldo_conta(c) for c in contas}
+    saldo_total = sum(s for cid, s in saldos.items()
+                      if next((c for c in contas if c.id == cid), None) and
+                      next((c for c in contas if c.id == cid)).status == 'ativo')
+    return render_template('financeiro/contas.html',
+                           contas=contas, saldos=saldos, saldo_total=saldo_total)
+
+
+@app.route('/financeiro/contas/nova', methods=['GET', 'POST'])
+@login_required
+def conta_bancaria_nova():
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('contas_bancarias'))
+    if request.method == 'POST':
+        try:
+            saldo_str = request.form.get('initial_balance', '0').replace('.', '').replace(',', '.')
+            data_str = request.form.get('opening_date', '')
+            c = BankAccount(
+                name=request.form['name'].strip(),
+                bank=request.form.get('bank', '').strip() or None,
+                agency=request.form.get('agency', '').strip() or None,
+                account_number=request.form.get('account_number', '').strip() or None,
+                account_type=request.form.get('account_type', 'corrente'),
+                pix_key=request.form.get('pix_key', '').strip() or None,
+                holder=request.form.get('holder', '').strip() or None,
+                document=request.form.get('document', '').strip() or None,
+                initial_balance=float(saldo_str) if saldo_str else 0,
+                opening_date=datetime.strptime(data_str, '%Y-%m-%d').date() if data_str else None,
+                color=request.form.get('color', '#4f6ef7'),
+                notes=request.form.get('notes', '').strip() or None,
+                status='ativo',
+            )
+            db.session.add(c)
+            db.session.commit()
+            flash('Conta bancária cadastrada com sucesso!', 'success')
+            return redirect(url_for('contas_bancarias'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Erro ao salvar: {str(e)}', 'danger')
+    return render_template('financeiro/conta_form.html', conta=None)
+
+
+@app.route('/financeiro/contas/<int:id>/editar', methods=['GET', 'POST'])
+@login_required
+def conta_bancaria_editar(id):
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('contas_bancarias'))
+    c = BankAccount.query.get_or_404(id)
+    if request.method == 'POST':
+        try:
+            saldo_str = request.form.get('initial_balance', '0').replace('.', '').replace(',', '.')
+            data_str = request.form.get('opening_date', '')
+            c.name = request.form['name'].strip()
+            c.bank = request.form.get('bank', '').strip() or None
+            c.agency = request.form.get('agency', '').strip() or None
+            c.account_number = request.form.get('account_number', '').strip() or None
+            c.account_type = request.form.get('account_type', 'corrente')
+            c.pix_key = request.form.get('pix_key', '').strip() or None
+            c.holder = request.form.get('holder', '').strip() or None
+            c.document = request.form.get('document', '').strip() or None
+            c.initial_balance = float(saldo_str) if saldo_str else 0
+            c.opening_date = datetime.strptime(data_str, '%Y-%m-%d').date() if data_str else None
+            c.color = request.form.get('color', '#4f6ef7')
+            c.notes = request.form.get('notes', '').strip() or None
+            db.session.commit()
+            flash('Conta bancária atualizada.', 'success')
+            return redirect(url_for('contas_bancarias'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Erro ao salvar: {str(e)}', 'danger')
+    return render_template('financeiro/conta_form.html', conta=c)
+
+
+@app.route('/financeiro/contas/<int:id>/toggle', methods=['POST'])
+@login_required
+def conta_bancaria_toggle(id):
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('contas_bancarias'))
+    c = BankAccount.query.get_or_404(id)
+    c.status = 'inativo' if c.status == 'ativo' else 'ativo'
+    db.session.commit()
+    flash(f'Conta {"ativada" if c.status == "ativo" else "inativada"}.', 'success')
+    return redirect(url_for('contas_bancarias'))
+
+
+@app.route('/financeiro/contas/<int:id>/excluir', methods=['POST'])
+@login_required
+def conta_bancaria_excluir(id):
+    if not current_user.can_edit():
+        flash('Sem permissão.', 'danger')
+        return redirect(url_for('contas_bancarias'))
+    c = BankAccount.query.get_or_404(id)
+    # impede excluir se houver lancamentos vinculados
+    em_uso = Transaction.query.filter_by(bank_account_id=c.id).count()
+    if em_uso:
+        flash(f'Não é possível excluir: existem {em_uso} lançamentos vinculados. '
+              f'Inative a conta em vez disso.', 'warning')
+        return redirect(url_for('contas_bancarias'))
+    db.session.delete(c)
+    db.session.commit()
+    flash('Conta bancária excluída.', 'success')
+    return redirect(url_for('contas_bancarias'))
+
+
+@app.route('/financeiro/contas/<int:id>/extrato')
+@login_required
+def conta_bancaria_extrato(id):
+    c = BankAccount.query.get_or_404(id)
+    data_ini = request.args.get('data_ini', '')
+    data_fim = request.args.get('data_fim', '')
+    q = Transaction.query.filter(Transaction.bank_account_id == c.id)
+    if data_ini:
+        q = q.filter(Transaction.date >= datetime.strptime(data_ini, '%Y-%m-%d').date())
+    if data_fim:
+        q = q.filter(Transaction.date <= datetime.strptime(data_fim, '%Y-%m-%d').date())
+    lancamentos = q.order_by(Transaction.date.asc(), Transaction.created_at.asc()).all()
+
+    saldo = float(c.initial_balance or 0)
+    linhas = []
+    for t in lancamentos:
+        if t.status == 'realizado':
+            saldo += float(t.value) if t.type == 'entrada' else -float(t.value)
+        linhas.append({'t': t, 'saldo_apos': saldo})
+
+    saldo_atual = _saldo_conta(c)
+    return render_template('financeiro/extrato.html',
+                           conta=c, linhas=linhas, saldo_atual=saldo_atual,
+                           filtros={'data_ini': data_ini, 'data_fim': data_fim})
+
 
 # ─── RELATÓRIOS ───────────────────────────────────────────────────────────────
 

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{% if conta %}Editar Conta{% else %}Nova Conta Bancária{% endif %}{% endblock %}
+{% block page_title %}{% if conta %}Editar Conta Bancária{% else %}Nova Conta Bancária{% endif %}{% endblock %}
+
+{% block content %}
+<div class="panel panel-narrow">
+  <div class="panel-header">
+    <h2 class="panel-title">{% if conta %}Editar{% else %}Cadastrar Nova Conta{% endif %}</h2>
+    <a href="{{ url_for('contas_bancarias') }}" class="btn btn-outline btn-sm">← Voltar</a>
+  </div>
+  <div class="panel-body">
+    <form method="POST">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Apelido / Identificação <span class="required">*</span></label>
+          <input type="text" name="name" class="form-control" required maxlength="120"
+                 placeholder="Ex: Itaú Principal, Caixa de Obra"
+                 value="{{ conta.name if conta else '' }}">
+        </div>
+        <div class="form-group">
+          <label>Cor de identificação</label>
+          <input type="color" name="color" class="form-control" style="height:40px;padding:4px"
+                 value="{{ conta.color if conta else '#4f6ef7' }}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Banco</label>
+          <input type="text" name="bank" class="form-control" maxlength="80"
+                 placeholder="Ex: Itaú, Bradesco, Caixa, Sicoob"
+                 value="{{ conta.bank or '' if conta else '' }}">
+        </div>
+        <div class="form-group">
+          <label>Tipo de conta</label>
+          <select name="account_type" class="form-control">
+            {% set tipo_atual = conta.account_type if conta else 'corrente' %}
+            <option value="corrente"   {% if tipo_atual == 'corrente'   %}selected{% endif %}>Conta Corrente</option>
+            <option value="poupanca"   {% if tipo_atual == 'poupanca'   %}selected{% endif %}>Poupança</option>
+            <option value="aplicacao"  {% if tipo_atual == 'aplicacao'  %}selected{% endif %}>Aplicação / Investimento</option>
+            <option value="caixa"      {% if tipo_atual == 'caixa'      %}selected{% endif %}>Caixinha / Dinheiro</option>
+            <option value="cartao"     {% if tipo_atual == 'cartao'     %}selected{% endif %}>Cartão</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Agência</label>
+          <input type="text" name="agency" class="form-control" maxlength="20"
+                 value="{{ conta.agency or '' if conta else '' }}">
+        </div>
+        <div class="form-group">
+          <label>Número da Conta</label>
+          <input type="text" name="account_number" class="form-control" maxlength="30"
+                 value="{{ conta.account_number or '' if conta else '' }}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Titular</label>
+          <input type="text" name="holder" class="form-control" maxlength="150"
+                 placeholder="Nome / Razão social"
+                 value="{{ conta.holder or '' if conta else '' }}">
+        </div>
+        <div class="form-group">
+          <label>CNPJ / CPF</label>
+          <input type="text" name="document" class="form-control" maxlength="20"
+                 value="{{ conta.document or '' if conta else '' }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Chave PIX</label>
+        <input type="text" name="pix_key" class="form-control" maxlength="120"
+               placeholder="Email, telefone, CNPJ ou chave aleatória"
+               value="{{ conta.pix_key or '' if conta else '' }}">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Saldo Inicial (R$)</label>
+          <input type="text" name="initial_balance" class="form-control money-input"
+                 placeholder="0,00"
+                 value="{{ '%.2f'|format(conta.initial_balance)|replace('.',',') if conta and conta.initial_balance else '' }}">
+          <p style="font-size:11px;color:#6b7280;margin-top:4px">Saldo na data do cadastro. Os lançamentos posteriores serão somados/subtraídos automaticamente.</p>
+        </div>
+        <div class="form-group">
+          <label>Data do Saldo Inicial</label>
+          <input type="date" name="opening_date" class="form-control"
+                 value="{{ conta.opening_date.strftime('%Y-%m-%d') if conta and conta.opening_date else '' }}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Observações</label>
+        <textarea name="notes" class="form-control" rows="3"
+                  placeholder="Informações adicionais...">{{ conta.notes or '' if conta else '' }}</textarea>
+      </div>
+
+      <div class="form-actions">
+        <a href="{{ url_for('contas_bancarias') }}" class="btn btn-outline">Cancelar</a>
+        <button type="submit" class="btn btn-primary">
+          {% if conta %}Salvar Alterações{% else %}Cadastrar Conta{% endif %}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.money-input').forEach(input => {
+  input.addEventListener('input', e => {
+    let v = e.target.value.replace(/\D/g, '');
+    if (!v) { e.target.value = ''; return; }
+    v = (parseInt(v) / 100).toFixed(2);
+    e.target.value = v.replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  });
+});
+</script>
+{% endblock %}

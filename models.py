@@ -99,6 +99,27 @@ class Supplier(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     transactions = db.relationship('Transaction', backref='supplier', lazy=True)
 
+class BankAccount(db.Model):
+    __tablename__ = 'bank_accounts'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)        # apelido / identificacao (ex: "Itau Principal")
+    bank = db.Column(db.String(80))                          # nome do banco
+    agency = db.Column(db.String(20))                        # agencia
+    account_number = db.Column(db.String(30))                # numero da conta
+    account_type = db.Column(db.String(20), default='corrente')  # corrente / poupanca / aplicacao / caixa
+    pix_key = db.Column(db.String(120))
+    holder = db.Column(db.String(150))                       # titular (PJ ou PF)
+    document = db.Column(db.String(20))                      # CNPJ / CPF do titular
+    initial_balance = db.Column(db.Float, default=0)         # saldo de abertura (data de cadastro)
+    opening_date = db.Column(db.Date)                        # data do saldo inicial
+    notes = db.Column(db.Text)
+    color = db.Column(db.String(20), default='#4f6ef7')      # cor para identificacao visual
+    status = db.Column(db.String(15), default='ativo')       # ativo / inativo
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    transactions = db.relationship('Transaction', backref='bank_account', lazy=True)
+    projections = db.relationship('Projection', backref='bank_account', lazy=True)
+
+
 class Transaction(db.Model):
     __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
@@ -109,6 +130,7 @@ class Transaction(db.Model):
     cost_center_id = db.Column(db.Integer, db.ForeignKey('cost_centers.id'), nullable=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=True)
     supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
+    bank_account_id = db.Column(db.Integer, db.ForeignKey('bank_accounts.id'), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     value = db.Column(db.Float, nullable=False)
     type = db.Column(db.String(10), nullable=False)
@@ -165,6 +187,7 @@ class Projection(db.Model):
     description = db.Column(db.String(255), nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=False)
     contract_id = db.Column(db.Integer, db.ForeignKey('contracts.id'), nullable=True)
+    bank_account_id = db.Column(db.Integer, db.ForeignKey('bank_accounts.id'), nullable=True)
     value = db.Column(db.Float, nullable=False)
     type = db.Column(db.String(10), nullable=False)
     notes = db.Column(db.Text)

@@ -14,8 +14,14 @@
         <div class="form-group">
           <label>Tipo <span class="required">*</span></label>
           <select name="type" id="tipo-select" class="form-control" required onchange="filtrarCategorias(this.value)">
-            <option value="entrada" {% if lancamento and lancamento.type == 'entrada' %}selected{% endif %}>Entrada</option>
-            <option value="saida" {% if lancamento and lancamento.type == 'saida' %}selected{% endif %}>Saída</option>
+            <option value="entrada"
+              {% if lancamento and lancamento.type == 'entrada' %}selected
+              {% elif not lancamento and tipo_pre == 'entrada' %}selected
+              {% endif %}>Entrada</option>
+            <option value="saida"
+              {% if lancamento and lancamento.type == 'saida' %}selected
+              {% elif not lancamento and tipo_pre == 'saida' %}selected
+              {% endif %}>Saída</option>
           </select>
         </div>
         <div class="form-group">
@@ -128,6 +134,24 @@
             <option value="previsto" {% if lancamento and lancamento.status == 'previsto' %}selected{% endif %}>Previsto</option>
           </select>
         </div>
+      </div>
+
+      <div class="form-group">
+        <label>Conta Bancária <span style="font-weight:400;color:var(--text-muted);font-size:11px">(de qual conta saiu / entrou o dinheiro)</span></label>
+        <select name="bank_account_id" class="form-control">
+          <option value="">— Não informada —</option>
+          {% for c in contas %}
+          <option value="{{ c.id }}" {% if lancamento and lancamento.bank_account_id == c.id %}selected{% endif %}>
+            {{ c.name }}{% if c.bank %} — {{ c.bank }}{% endif %}{% if c.account_number %} (CC {{ c.account_number }}){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        {% if not contas %}
+        <p style="font-size:11.5px;color:#6b7280;margin-top:5px">
+          Nenhuma conta bancária cadastrada.
+          <a href="{{ url_for('conta_bancaria_nova') }}" style="color:var(--accent)">Cadastrar agora</a>
+        </p>
+        {% endif %}
       </div>
 
       <div class="form-group">

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Contas Bancárias{% endblock %}
+{% block page_title %}Contas Bancárias{% endblock %}
+
+{% macro brl(v) -%}
+  R$ {{ "{:,.2f}".format(v).replace(",","X").replace(".",",").replace("X",".") }}
+{%- endmacro %}
+
+{% block content %}
+
+<div class="cards-grid cards-grid-2">
+  <div class="card card-blue">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Saldo Total Consolidado</span>
+      <span class="card-value {% if saldo_total >= 0 %}text-green{% else %}text-red{% endif %}">{{ brl(saldo_total) }}</span>
+      <span style="font-size:11.5px;color:#6b7280">Soma de todas as contas ativas</span>
+    </div>
+  </div>
+  <div class="card card-gray">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line></svg>
+    </div>
+    <div class="card-content">
+      <span class="card-label">Contas Cadastradas</span>
+      <span class="card-value">{{ contas|length }}</span>
+      <span style="font-size:11.5px;color:#6b7280">{{ contas|selectattr('status','eq','ativo')|list|length }} ativa(s)</span>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <h2 class="panel-title">Contas da Empresa</h2>
+    {% if current_user.can_edit() %}
+    <a href="{{ url_for('conta_bancaria_nova') }}" class="btn btn-primary btn-sm">+ Nova Conta</a>
+    {% endif %}
+  </div>
+  <div class="panel-body">
+    {% if contas %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Apelido</th>
+            <th>Banco</th>
+            <th>Agência / Conta</th>
+            <th>Tipo</th>
+            <th>Titular</th>
+            <th class="text-right">Saldo Atual</th>
+            <th>Status</th>
+            <th class="text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in contas %}
+          <tr {% if c.status == 'inativo' %}style="opacity:0.55"{% endif %}>
+            <td><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:{{ c.color or '#4f6ef7' }}"></span></td>
+            <td><strong>{{ c.name }}</strong></td>
+            <td>{{ c.bank or '-' }}</td>
+            <td class="text-sm text-gray nowrap">
+              {% if c.agency or c.account_number %}
+                {{ c.agency or '—' }} / {{ c.account_number or '—' }}
+              {% else %}-{% endif %}
+            </td>
+            <td><span class="badge badge-gray">{{ c.account_type|capitalize }}</span></td>
+            <td class="text-sm text-gray">{{ c.holder or '-' }}</td>
+            <td class="text-right font-bold {% if saldos[c.id] >= 0 %}text-green{% else %}text-red{% endif %} nowrap">
+              {{ brl(saldos[c.id]) }}
+            </td>
+            <td>
+              {% if c.status == 'ativo' %}
+                <span class="badge badge-green">Ativo</span>
+              {% else %}
+                <span class="badge badge-red">Inativo</span>
+              {% endif %}
+            </td>
+            <td class="text-center nowrap">
+              <a href="{{ url_for('conta_bancaria_extrato', id=c.id) }}" class="btn btn-outline btn-xs">Extrato</a>
+              {% if current_user.can_edit() %}
+              <a href="{{ url_for('conta_bancaria_editar', id=c.id) }}" class="btn btn-outline btn-xs">Editar</a>
+              <form method="POST" action="{{ url_for('conta_bancaria_toggle', id=c.id) }}" style="display:inline">
+                <button type="submit" class="btn btn-outline btn-xs">
+                  {% if c.status == 'ativo' %}Inativar{% else %}Ativar{% endif %}
+                </button>
+              </form>
+              <form method="POST" action="{{ url_for('conta_bancaria_excluir', id=c.id) }}" style="display:inline"
+                onsubmit="return confirm('Excluir esta conta? Isso só funciona se não houver lançamentos vinculados.')">
+                <button type="submit" class="btn btn-danger btn-xs">Excluir</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="20" height="14" rx="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg>
+      <p>Nenhuma conta bancária cadastrada ainda.</p>
+      {% if current_user.can_edit() %}
+      <a href="{{ url_for('conta_bancaria_nova') }}" class="btn btn-primary mt-1">+ Cadastrar Primeira Conta</a>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
